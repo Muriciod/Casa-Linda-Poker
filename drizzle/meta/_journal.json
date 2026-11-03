@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1785855335099,
+      "tag": "0000_overjoyed_shinobi_shaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785869832546,
+      "tag": "0001_tricky_shockwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785869861203,
+      "tag": "0002_neat_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785937693001,
+      "tag": "0003_regular_exiles",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,307 @@
+/**
+ * CASA LINDA POKER · Puente seguro con Google Sheets
+ *
+ * 1. Abrí la hoja CasaLindaPoker-Leaderboard.
+ * 2. Extensiones → Apps Script.
+ * 3. Reemplazá el contenido por este archivo.
+ * 4. Cambiá PEGAR_UNA_CLAVE_PRIVADA por una clave larga que solo vos conozcas.
+ * 5. Implementar → Nueva implementación → Aplicación web.
+ *    Ejecutar como: Yo. Acceso: Cualquier persona.
+ * 6. Copiá la URL /exec y cargala en Configuración dentro de la web.
+ */
+
+const CASA_LINDA_API_SECRET = "PEGAR_UNA_CLAVE_PRIVADA";
+const CASA_LINDA_SHEET_ID = "16K-SubRvX6953dB8-_8kdRUAh5FRGAQB-SOfeYE8UCY";
+
+const TABS = {
+  roster: "App - Jugadores",
+  games: "App - Partidas",
+  movements: "App - Movimientos",
+  results: "App - Resultados",
+  legacy: "Carga Sesiones",
+};
+
+function json_(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function authorized_(secret) {
+  return typeof secret === "string" && secret.length >= 12 && secret === CASA_LINDA_API_SECRET;
+}
+
+function safeText_(value) {
+  const text = String(value == null ? "" : value);
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
+function iso_(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+function sheet_(name) {
+  const sheet = SpreadsheetApp.openById(CASA_LINDA_SHEET_ID).getSheetByName(name);
+  if (!sheet) throw new Error("No existe la pestaña " + name);
+  return sheet;
+}
+
+function values_(name) {
+  return sheet_(name).getDataRange().getValues();
+}
+
+function headerMap_(rows) {
+  const map = {};
+  (rows[0] || []).forEach(function (header, index) { map[String(header).trim()] = index; });
+  return map;
+}
+
+function rosterSnapshot_() {
+  const rows = values_(TABS.roster);
+  const h = headerMap_(rows);
+  return rows.slice(1).filter(function (row) { return row[h.ID] && row[h.Nombre]; }).map(function (row) {
+    return {
+      id: String(row[h.ID]),
+      name: String(row[h.Nombre]),
+      nickname: String(row[h.Apodo] || ""),
+      kind: String(row[h.Tipo] || "permanente"),
+      active: row[h.Activo] !== false,
+      avatarKey: String(row[h.Avatar] || ""),
+      createdAt: iso_(row[h.Creado]),
+    };
+  });
+}
+
+function appGamesSnapshot_() {
+  const gameRows = values_(TABS.games);
+  const movementRows = values_(TABS.movements);
+  const resultRows = values_(TABS.results);
+  const gh = headerMap_(gameRows);
+  const mh = headerMap_(movementRows);
+  const rh = headerMap_(resultRows);
+
+  return gameRows.slice(1).filter(function (row) { return row[gh.ID]; }).map(function (row) {
+    const gameId = String(row[gh.ID]);
+    const playerMap = {};
+    movementRows.slice(1).filter(function (movement) { return String(movement[mh["Partida ID"]]) === gameId; }).forEach(function (movement) {
+      const playerId = String(movement[mh["Jugador ID"]]);
+      if (!playerMap[playerId]) playerMap[playerId] = {
+        id: playerId,
+        name: String(movement[mh.Nombre] || "Jugador"),
+        nickname: String(movement[mh.Apodo] || ""),
+        avatar: String(movement[mh.Avatar] || String(movement[mh.Nombre] || "J").charAt(0)),
+        movements: [],
+        cashOut: null,
+      };
+      playerMap[playerId].movements.push({
+        id: String(movement[mh.ID]),
+        type: String(movement[mh.Tipo]) === "rebuy" ? "rebuy" : "buyin",
+        amount: Number(movement[mh.Monto] || 0),
+        createdAt: iso_(movement[mh["Fecha y hora"]]),
+      });
+    });
+    resultRows.slice(1).filter(function (result) { return String(result[rh["Partida ID"]]) === gameId; }).forEach(function (result) {
+      const playerId = String(result[rh["Jugador ID"]]);
+      if (!playerMap[playerId]) playerMap[playerId] = {
+        id: playerId,
+        name: String(result[rh.Nombre] || "Jugador"),
+        nickname: String(result[rh.Apodo] || ""),
+        avatar: String(result[rh.Avatar] || String(result[rh.Nombre] || "J").charAt(0)),
+        movements: [],
+        cashOut: null,
+      };
+      playerMap[playerId].cashOut = result[rh["Cash-out"]] === "" ? null : Number(result[rh["Cash-out"]]);
+    });
+    return {
+      id: gameId,
+      name: String(row[gh.Nombre] || "Partida"),
+      status: String(row[gh.Estado]) === "active" ? "active" : "finalized",
+      startedAt: iso_(row[gh.Inicio]),
+      endedAt: row[gh.Fin] ? iso_(row[gh.Fin]) : null,
+      currency: "PYG",
+      standardBuyIn: Number(row[gh["Buy-in estándar"]] || 500000),
+      startingChips: Number(row[gh["Fichas iniciales"]] || 0),
+      blinds: String(row[gh.Blinds] || ""),
+      notes: String(row[gh.Notas] || ""),
+      sheetColumn: Number(row[gh["Columna Leaderboard"]] || 0) || null,
+      players: Object.keys(playerMap).map(function (key) { return playerMap[key]; }),
+    };
+  });
+}
+
+function standardBuyInFromHeader_(header) {
+  const match = String(header || "").match(/\(([\d.,]+)\s*([MK])?\)/i);
+  if (!match) return 500000;
+  const number = Number(match[1].replaceAll(".", "").replace(",", "."));
+  return Math.round(number * (String(match[2]).toUpperCase() === "M" ? 1000000 : String(match[2]).toUpperCase() === "K" ? 1000 : 1));
+}
+
+function legacyGamesSnapshot_() {
+  const rows = values_(TABS.legacy);
+  if (rows.length < 5) return [];
+  const games = [];
+  for (let column = 1; column < Math.min(rows[3].length, 51); column += 1) {
+    const header = rows[3][column];
+    if (!header) continue;
+    const players = [];
+    for (let rowIndex = 4; rowIndex < rows.length; rowIndex += 1) {
+      const name = rows[rowIndex][0];
+      const net = rows[rowIndex][column];
+      if (!name || net === "" || net == null || isNaN(Number(net))) continue;
+      players.push({
+        id: "legacy-player-" + column + "-" + rowIndex,
+        name: String(name),
+        nickname: "",
+        avatar: String(name).charAt(0).toUpperCase(),
+        movements: [],
+        cashOut: null,
+        legacyResult: Number(net),
+      });
+    }
+    if (!players.length) continue;
+    const startedAt = iso_(rows[2][column]) || new Date(2026, 0, Math.min(column, 28)).toISOString();
+    games.push({
+      id: "legacy-session-" + column,
+      name: String(header),
+      currency: "PYG",
+      standardBuyIn: standardBuyInFromHeader_(header),
+      startingChips: 0,
+      blinds: "",
+      notes: "Resultado histórico importado de Carga Sesiones",
+      startedAt: startedAt,
+      endedAt: startedAt,
+      status: "finalized",
+      legacy: true,
+      sheetColumn: column + 1,
+      players: players,
+    });
+  }
+  return games;
+}
+
+function snapshot_() {
+  const byId = {};
+  appGamesSnapshot_().concat(legacyGamesSnapshot_()).forEach(function (game) { byId[game.id] = game; });
+  return { ok: true, games: Object.keys(byId).map(function (id) { return byId[id]; }), roster: rosterSnapshot_(), sheetId: CASA_LINDA_SHEET_ID };
+}
+
+function writeRows_(tabName, rows) {
+  const sheet = sheet_(tabName);
+  const maxRows = Math.max(2, sheet.getMaxRows());
+  const maxColumns = sheet.getMaxColumns();
+  if (maxRows > 1) sheet.getRange(2, 1, maxRows - 1, maxColumns).clearContent();
+  if (rows.length) sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+function resultOf_(player) {
+  if (typeof player.legacyResult === "number") return player.legacyResult;
+  const invested = (player.movements || []).reduce(function (sum, movement) { return sum + Number(movement.amount || 0); }, 0);
+  return Number(player.cashOut || 0) - invested;
+}
+
+function nextLegacyColumn_(sheet) {
+  const headers = sheet.getRange(4, 2, 1, Math.max(1, sheet.getLastColumn() - 1)).getValues()[0];
+  const empty = headers.findIndex(function (header) { return !header; });
+  if (empty >= 0) return empty + 2;
+  const next = sheet.getLastColumn() + 1;
+  if (next > sheet.getMaxColumns()) sheet.insertColumnAfter(sheet.getMaxColumns());
+  return next;
+}
+
+function writeFinalResultToLegacy_(game, existingColumn) {
+  if (game.legacy || game.status !== "finalized") return existingColumn || "";
+  const sheet = sheet_(TABS.legacy);
+  const column = Number(existingColumn) || nextLegacyColumn_(sheet);
+  const sessionNumber = column - 1;
+  const buyIn = Number(game.standardBuyIn || 500000);
+  const label = buyIn >= 1000000 ? (buyIn / 1000000) + "M" : Math.round(buyIn / 1000) + "K";
+  sheet.getRange(3, column).setValue(new Date(game.startedAt));
+  sheet.getRange(4, column).setValue("Sesión " + sessionNumber + " (" + label + ")");
+  const nameRange = sheet.getRange(5, 1, Math.max(1, sheet.getLastRow() - 4), 1);
+  const names = nameRange.getValues().map(function (row) { return String(row[0]).trim().toLowerCase(); });
+  (game.players || []).forEach(function (player) {
+    const displayName = String(player.nickname || player.name || "Jugador");
+    let index = names.indexOf(displayName.trim().toLowerCase());
+    if (index < 0) {
+      index = names.length;
+      sheet.getRange(5 + index, 1).setValue(safeText_(displayName));
+      names.push(displayName.trim().toLowerCase());
+    }
+    sheet.getRange(5 + index, column).setValue(resultOf_(player));
+  });
+  return column;
+}
+
+function saveSnapshot_(payload) {
+  const previousRows = values_(TABS.games);
+  const previousHeader = headerMap_(previousRows);
+  const columnByGame = {};
+  previousRows.slice(1).forEach(function (row) {
+    if (row[previousHeader.ID]) columnByGame[String(row[previousHeader.ID])] = row[previousHeader["Columna Leaderboard"]] || "";
+  });
+  const games = (payload.games || []).filter(function (game) { return !game.legacy; });
+  const roster = (payload.roster || []).filter(function (player) { return player.kind !== "temporal"; });
+  const gameRows = [];
+  const movementRows = [];
+  const resultRows = [];
+
+  games.forEach(function (game) {
+    const sheetColumn = writeFinalResultToLegacy_(game, columnByGame[game.id]);
+    gameRows.push([safeText_(game.id), safeText_(game.name), safeText_(game.status), safeText_(game.startedAt), safeText_(game.endedAt || ""), "PYG", Number(game.standardBuyIn || 0), Number(game.startingChips || 0), safeText_(game.blinds || ""), safeText_(game.notes || ""), sheetColumn || ""]);
+    (game.players || []).forEach(function (player) {
+      let total = 0;
+      let buyIns = 0;
+      let rebuys = 0;
+      (player.movements || []).forEach(function (movement) {
+        total += Number(movement.amount || 0);
+        if (movement.type === "rebuy") rebuys += 1; else buyIns += 1;
+        movementRows.push([safeText_(movement.id), safeText_(game.id), safeText_(player.id), safeText_(player.name), safeText_(player.nickname || ""), safeText_(player.avatar || ""), safeText_(movement.type), Number(movement.amount || 0), safeText_(movement.createdAt)]);
+      });
+      const cashOut = player.cashOut == null ? "" : Number(player.cashOut);
+      const net = cashOut === "" ? "" : Number(cashOut) - total;
+      resultRows.push([safeText_(game.id), safeText_(player.id), safeText_(player.name), safeText_(player.nickname || ""), safeText_(player.avatar || ""), total, cashOut, net, buyIns, rebuys, total && net !== "" ? Number(net) / total : ""]);
+    });
+  });
+
+  writeRows_(TABS.roster, roster.map(function (player) { return [safeText_(player.id), safeText_(player.name), safeText_(player.nickname || ""), "permanente", player.active !== false, safeText_(player.createdAt || new Date().toISOString()), safeText_(player.avatarKey || "")]; }));
+  writeRows_(TABS.games, gameRows);
+  writeRows_(TABS.movements, movementRows);
+  writeRows_(TABS.results, resultRows);
+  return { ok: true, savedGames: games.length, savedPlayers: roster.length };
+}
+
+function deleteGame_(gameId) {
+  const rows = values_(TABS.games);
+  const h = headerMap_(rows);
+  const target = rows.slice(1).find(function (row) { return String(row[h.ID]) === String(gameId); });
+  if (target && target[h["Columna Leaderboard"]]) {
+    const sheet = sheet_(TABS.legacy);
+    const column = Number(target[h["Columna Leaderboard"]]);
+    sheet.getRange(3, column, Math.max(2, sheet.getLastRow() - 2), 1).clearContent();
+  }
+  return { ok: true };
+}
+
+function doGet(e) {
+  try {
+    if (!authorized_(e && e.parameter && e.parameter.secret)) return json_({ ok: false, error: "No autorizado" });
+    const action = String((e && e.parameter && e.parameter.action) || "ping");
+    if (action === "ping") return json_({ ok: true, sheetId: CASA_LINDA_SHEET_ID });
+    if (action === "snapshot") return json_(snapshot_());
+    return json_({ ok: false, error: "Acción desconocida" });
+  } catch (error) {
+    return json_({ ok: false, error: String(error && error.message ? error.message : error) });
+  }
+}
+
+function doPost(e) {
+  try {
+    const payload = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    if (!authorized_(payload.secret)) return json_({ ok: false, error: "No autorizado" });
+    if (payload.action === "saveSnapshot") return json_(saveSnapshot_(payload));
+    if (payload.action === "deleteGame") return json_(deleteGame_(payload.gameId));
+    return json_({ ok: false, error: "Acción desconocida" });
+  } catch (error) {
+    return json_({ ok: false, error: String(error && error.message ? error.message : error) });
+  }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `poker_roster` ADD `avatar_key` text DEFAULT '' NOT NULL;
