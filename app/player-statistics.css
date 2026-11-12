@@ -1,0 +1,302 @@
+.player-statistics {
+  --statistics-radius: 16px;
+}
+
+.player-statistics .page-heading h1,
+.player-statistics .profile-session-title strong,
+.player-statistics .profile-identity strong {
+  overflow-wrap: anywhere;
+}
+
+.player-statistics .page-heading h1 {
+  scroll-margin-top: 5.5rem;
+}
+
+.player-statistics .statistics-filters {
+  align-items: start;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 14px 20px;
+}
+
+.statistics-modality,
+.statistics-period {
+  min-width: 0;
+}
+
+.statistics-filter-label {
+  display: block;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 650;
+  margin: 0 0 8px;
+}
+
+.player-statistics .archive-tabs button,
+.player-statistics .profile-visibility button,
+.player-statistics .profile-upload,
+.player-statistics .statistics-empty button {
+  min-height: 44px;
+}
+
+.statistics-period {
+  align-self: end;
+  justify-self: end;
+}
+
+.statistics-period[open] {
+  width: 100%;
+}
+
+.statistics-period > summary,
+.statistics-help > summary {
+  min-height: 44px;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text);
+  font-size: .875rem;
+}
+
+.statistics-period > summary {
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 9px;
+}
+
+.statistics-period > summary::-webkit-details-marker,
+.statistics-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.statistics-period > summary::after,
+.statistics-help > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  margin-inline: 3px;
+}
+
+.statistics-period[open] > summary::after,
+.statistics-help[open] > summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.statistics-period .statistics-dates {
+  justify-content: end;
+  margin-top: 12px;
+}
+
+.statistics-filter-active {
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: .625rem;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.player-statistics .statistics-search input,
+.player-statistics .statistics-dates input {
+  font-size: 1rem;
+}
+
+.player-statistics .statistics-list-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.statistics-list-heading h2 {
+  margin: 0;
+  font-size: clamp(1.1rem, 3vw, 1.375rem);
+}
+
+.statistics-list-heading > span {
+  color: var(--muted);
+  font-size: .75rem;
+  white-space: nowrap;
+}
+
+.statistics-list-heading + .statistics-explainer {
+  margin: 8px 0 16px;
+}
+
+.player-statistics .statistics-player-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
+}
+
+.player-statistics .statistics-player-grid li,
+.player-statistics .statistics-card-result > span {
+  min-width: 0;
+}
+
+.player-statistics .statistics-player-card {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.player-statistics .statistics-position {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-statistics .statistics-position.is-leading {
+  background: var(--brand-soft);
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--border-strong));
+  color: var(--text);
+}
+
+.player-statistics .statistics-card-result {
+  margin-top: 18px;
+}
+
+.player-statistics .statistics-card-result + .statistics-card-result {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.player-statistics .statistics-card-result strong {
+  overflow-wrap: anywhere;
+}
+
+.player-statistics .statistics-card-result > span:last-child {
+  align-self: end;
+}
+
+.player-statistics .statistics-empty {
+  border-style: dashed;
+  color: var(--muted);
+  padding: 18px;
+}
+
+.statistics-empty strong {
+  display: block;
+  color: var(--text);
+}
+
+.statistics-empty p {
+  margin: 5px 0 0;
+}
+
+.statistics-empty button {
+  margin-top: 12px;
+}
+
+.statistics-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.statistics-loading-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex: none;
+}
+
+.profile-rate-label {
+  display: block;
+  margin-top: 12px;
+}
+
+.profile-outcome-track {
+  display: flex;
+  gap: 3px;
+  height: 5px;
+  margin: 0 0 14px;
+  overflow: hidden;
+  border-radius: 99px;
+}
+
+.profile-outcome-track span {
+  flex-basis: 0;
+  min-width: 3px;
+}
+
+.profile-outcome-track .wins { background: var(--positive); }
+.profile-outcome-track .losses { background: var(--negative); }
+.profile-outcome-track .ties { background: var(--muted); }
+
+.statistics-help {
+  color: var(--muted);
+  font-size: .8125rem;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.statistics-help > p {
+  max-width: 65ch;
+  margin: 0 0 16px;
+}
+
+.statistics-session-date {
+  color: var(--muted);
+  font-size: .75rem;
+}
+
+@media (max-width: 680px) {
+  .player-statistics .statistics-filters {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+    border-radius: var(--statistics-radius);
+  }
+
+  .player-statistics .statistics-filters .archive-tabs,
+  .player-statistics .statistics-toolbar .archive-tabs,
+  .player-statistics .profile-visibility button {
+    width: 100%;
+  }
+
+  .player-statistics .archive-tabs button {
+    flex: 1 1 auto;
+    padding-inline: 7px;
+  }
+
+  .statistics-period,
+  .statistics-period > summary {
+    width: 100%;
+  }
+
+  .statistics-period > summary::after {
+    margin-left: auto;
+  }
+
+  .statistics-period .statistics-dates {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .statistics-period .statistics-dates > button {
+    grid-column: 1 / -1;
+  }
+
+  .player-statistics .profile-session {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .player-statistics .statistics-player-card {
+    padding: 16px;
+  }
+}

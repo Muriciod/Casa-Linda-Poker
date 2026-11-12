@@ -45,6 +45,11 @@ test('dates use Paraguay local day and inclusive boundaries', () => {
   const p = profile([game('late', 100, { startedAt: '2026-10-15T01:30:00Z' }), game('next', 20, { startedAt: '2026-10-15T16:00:00Z' })]);
   assert.deepEqual(filterSessions(p.sessions, { mode: 'all', from: '2026-10-14', to: '2026-10-14' }).map(s => s.game.id), ['late']);
 });
+test('an imported session with no valid date still contributes to unfiltered totals', () => {
+  const p = profile([game('unknown-date', 100, { startedAt: 'sin fecha' }), game('dated', 20)]);
+  assert.equal(summarizeSessions(filterSessions(p.sessions, { mode: 'all', from: '', to: '' })).balance, 120);
+  assert.deepEqual(filterSessions(p.sessions, { mode: 'all', from: '', to: '2026-10-14' }).map(s => s.game.id), ['dated']);
+});
 test('registered players with the same name remain separate by ID', () => {
   const duplicateRoster = [{ id: 'one', name: 'Alex', kind: 'permanente' }, { id: 'two', name: 'Alex', kind: 'permanente' }];
   const profiles = buildPlayerProfiles([game('one', 100, { players: [player(100, { id: 'one', name: 'Alex', nickname: '' }), player(-100, { id: 'two', name: 'Alex', nickname: '' })] })], duplicateRoster);

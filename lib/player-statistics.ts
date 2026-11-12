@@ -63,29 +63,61 @@ export function sessionResult({ game, player }: PlayerSession): number | null {
   if (player.cashOut === null || !Number.isFinite(player.cashOut)) return null;
   return player.cashOut - player.movements.reduce((sum, movement) => sum + movement.amount, 0);
 }
+
+const dayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion", year: "numeric", month: "2-digit", day: "2-digit" });
+const gameDays = new WeakMap<StatisticsGame, { startedAt: string; day: string }>();
 export function sessionDay(value: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Asuncion", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const parts = dayFormatter.formatToParts(date);
   const get = (type: string) => parts.find(part => part.type === type)?.value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 export function filterSessions(sessions: PlayerSession[], filter: StatisticsFilter) {
-  return sessions.filter(({ game }) => game.mode !== "temporary" && (filter.mode === "all" || (game.mode || "chips") === filter.mode)
-    && (!filter.from || sessionDay(game.startedAt) >= filter.from) && (!filter.to || sessionDay(game.startedAt) <= filter.to));
+  const { mode, from, to } = filter;
+  return sessions.filter(({ game }) => {
+    if (game.mode === "temporary" || (mode !== "all" && (game.mode || "chips") !== mode)) return false;
+    if (!from && !to) return true;
+    let entry = gameDays.get(game);
+    if (!entry || entry.startedAt !== game.startedAt) {
+      entry = { startedAt: game.startedAt, day: sessionDay(game.startedAt) };
+      gameDays.set(game, entry);
+    }
+    const { day } = entry;
+    return Boolean(day && (!from || day >= from) && (!to || day <= to));
+  });
 }
 export function summarizeSessions(sessions: PlayerSession[]) {
-  const persistent = sessions.filter(s => s.game.mode !== "temporary");
-  const results = persistent.map(sessionResult).filter((value): value is number => value !== null);
-  const wins = results.filter(value => value > 0).length;
-  const losses = results.filter(value => value < 0).length;
-  const ties = results.filter(value => value === 0).length;
-  const balance = results.reduce((sum, value) => sum + value, 0);
-  const detailed = persistent.filter(s => !s.game.legacy);
-  return { total: persistent.length, settled: results.length, wins, losses, ties,
-    winRate: results.length ? wins / results.length * 100 : null, balance,
-    average: results.length ? balance / results.length : null,
-    best: results.length ? Math.max(...results) : null, worst: results.length ? Math.min(...results) : null,
-    invested: detailed.reduce((sum, s) => sum + s.player.movements.reduce((n, m) => n + m.amount, 0), 0),
-    rebuys: detailed.reduce((sum, s) => sum + s.player.movements.filter(m => m.type === "rebuy").length, 0),
-    averageBuyIns: detailed.length ? detailed.reduce((sum, s) => sum + s.player.movements.length, 0) / detailed.length : null,
+  let total = 0, settled = 0, wins = 0, losses = 0, ties = 0, balance = 0;
+  let best: number | null = null, worst: number | null = null;
+  let detailed = 0, invested = 0, rebuys = 0, purchases = 0;
+  for (const session of sessions) {
+    if (session.game.mode === "temporary") continue;
+    total++;
+    const net = sessionResult(session);
+    if (net !== null) {
+      settled++;
+      if (net > 0) wins++;
+      else if (net < 0) losses++;
+      else if (net === 0) ties++;
+      balance += net;
+      best = best === null ? net : Math.max(best, net);
+      worst = worst === null ? net : Math.min(worst, net);
+    }
+    if (session.game.legacy) continue;
+    detailed++;
+    let sessionInvestment = 0;
+    for (const movement of session.player.movements) {
+      sessionInvestment += movement.amount;
+      if (movement.type === "rebuy") rebuys++;
+      purchases++;
+    }
+    invested += sessionInvestment;
+  }
+  return { total, settled, wins, losses, ties,
+    winRate: settled ? wins / settled * 100 : null, balance,
+    average: settled ? balance / settled : null,
+    best, worst, invested, rebuys,
+    averageBuyIns: detailed ? purchases / detailed : null,
   };
 }
