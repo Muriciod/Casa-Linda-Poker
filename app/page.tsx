@@ -508,7 +508,7 @@ export default function Home() {
     showToast("Preparando imagen y avatares…");
     try {
       const canvas = await renderSummaryImage({
-        name: activeGame.name, date: dateTime(activeGame.startedAt), mode: modeLabels[activeGame.mode || "chips"],
+        name: activeGame.name, date: dateTime(activeGame.startedAt), mode: modeLabels[activeGame.mode || "chips"], gameMode: activeGame.mode || "chips",
         blinds: activeGame.blinds, duration: activeGame.legacy ? "Histórica" : duration(activeGame.startedAt, activeGame.endedAt),
         legacy: Boolean(activeGame.legacy),
         players: activeGame.players.map(player => ({ name: player.nickname || player.name, avatarUrl: avatarUrlForPlayer(player),
