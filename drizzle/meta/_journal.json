@@ -36,6 +36,13 @@
       "when": 1794684477630,
       "tag": "0004_abandoned_network",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794692141585,
+      "tag": "0005_lame_garia",
+      "breakpoints": true
     }
   ]
 }

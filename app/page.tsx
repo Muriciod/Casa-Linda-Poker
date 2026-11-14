@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import PlayerStatistics from "./PlayerStatistics";
+import AdminNotes from "./AdminNotes";
 import Transfers from "./PaymentTools";
 import ParticipantEditor from "./ParticipantEditor";
 import { editParticipant } from "../lib/player-edit";
@@ -616,6 +617,7 @@ export default function Home() {
             <button onClick={() => navigate("history")}><span className="home-link-icon"><AppIcon name="history" /></span><span><strong>Historial</strong><small>Explorar las sesiones de la casa</small></span><b aria-hidden="true">→</b></button>
             <button onClick={() => navigate("stats")}><span className="home-link-icon"><AppIcon name="stats" /></span><span><strong>Estadísticas</strong><small>Ver rankings y perfiles</small></span><b aria-hidden="true">→</b></button>
           </div>
+          {canEdit && <AdminNotes />}
           {canEdit && temporaryGames.length > 0 && <section className="temporary-sessions">
             <div><span className="section-kicker">SOLO EN ESTA PESTAÑA</span><h2>Mesas temporales</h2></div>
             <div className="home-links">

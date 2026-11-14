@@ -46,3 +46,9 @@ export const pokerTransfers = sqliteTable("poker_transfers", {
   completed: integer("completed").notNull().default(0),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const pokerAdminNotes = sqliteTable("poker_admin_notes", {
+  id: text("id").primaryKey(),
+  body: text("body").notNull(),
+  createdAt: text("created_at").notNull(),
+});

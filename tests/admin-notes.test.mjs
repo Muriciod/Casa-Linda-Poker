@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,readdirSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import ts from 'typescript';
+let authorized=true;
+const sqlite=new DatabaseSync(':memory:');
+const migration=readdirSync(new URL('../drizzle/',import.meta.url)).find(x=>x.startsWith('0005_')&&x.endsWith('.sql'));
+sqlite.exec(readFileSync(new URL('../drizzle/'+migration,import.meta.url),'utf8'));
+const db={prepare(sql){const statement=(values=[])=>({bind:(...v)=>statement(v),all:async()=>({results:sqlite.prepare(sql).all(...values)}),run:async()=>sqlite.prepare(sql).run(...values)});return statement();}};
+globalThis.__notesDeps={requireAdmin:async()=>{if(!authorized)throw new Response('Unauthorized',{status:401});},ensureAppSchema:async()=>db};
+const source=readFileSync(new URL('../app/api/admin-notes/route.ts',import.meta.url),'utf8').replace(/^import .*;$/gm,'');
+const js=ts.transpileModule('const {requireAdmin,ensureAppSchema}=globalThis.__notesDeps;\n'+source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const api=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+const request=(method,body)=>new Request('https://local.test/api/admin-notes',{method,...(body===undefined?{}:{body:JSON.stringify(body)})});
+test('notes persist on subsequent reads, preserve multiline text and delete independently',async()=>{
+ const first=await api.POST(request('POST',{body:'  Próxima mesa\nComprar fichas  '}));assert.equal(first.status,201);const {note}=await first.json();
+ const second=await api.POST(request('POST',{body:'<script>not executed</script>'}));const other=(await second.json()).note;
+ const response=await api.GET(request('GET'));assert.equal(response.headers.get('cache-control'),'private, no-store');
+ const notes=(await response.json()).notes;assert.equal(notes.length,2);assert.equal(notes.find(n=>n.id===note.id).body,'Próxima mesa\nComprar fichas');
+ assert.equal((await api.DELETE(request('DELETE',{id:note.id}))).status,200);
+ assert.deepEqual((await (await api.GET(request('GET'))).json()).notes,[other]);
+});
+test('invalid notes cannot be stored',async()=>{for(const body of ['', '   ', 'x'.repeat(4001),null,42])assert.equal((await api.POST(request('POST',{body}))).status,400);assert.equal((await api.POST(new Request('https://local.test',{method:'POST',body:'invalid'}))).status,400);assert.equal((await api.DELETE(request('DELETE',{}))).status,400);});
+test('all note endpoints reject non-admins without changing data',async()=>{const before=sqlite.prepare('SELECT * FROM poker_admin_notes').all();authorized=false;for(const method of ['GET','POST','DELETE']){const r=await api[method](request(method,method==='GET'?undefined:{body:'bad',id:before[0].id}));assert.equal(r.status,401);assert.equal(r.headers.get('cache-control'),'private, no-store');}assert.deepEqual(sqlite.prepare('SELECT * FROM poker_admin_notes').all(),before);authorized=true;});
+test('home only mounts notes for administrator and cards render plain text',()=>{const home=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');assert.ok(home.includes('{canEdit && <AdminNotes />}'));const ui=readFileSync(new URL('../app/AdminNotes.tsx',import.meta.url),'utf8');assert.ok(ui.includes('<p>{note.body}</p>'));assert.ok(!ui.includes('dangerouslySetInnerHTML'));});
