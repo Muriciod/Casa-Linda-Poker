@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const source=readFileSync(new URL('../lib/summary-image.ts',import.meta.url),'utf8');
+const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {renderSummaryImage}=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+let labels=[],pictures=0;
+globalThis.Image=class {naturalWidth=80;naturalHeight=120;set src(url){queueMicrotask(()=>url.includes('missing')?this.onerror?.():this.onload?.());}};
+const context=new Proxy({fillText:(text,x,y)=>labels.push({text,x,y}),measureText:text=>({width:text.length*12}),drawImage:()=>pictures++,createRadialGradient:()=>({addColorStop(){}})},{get:(obj,key)=>obj[key]??(()=>{})});
+globalThis.document={createElement:()=>({getContext:()=>context})};
+const fixture=n=>({name:'Prueba',date:'14 nov.',mode:'Fichas',blinds:'200 / 400',duration:'1h 30m',legacy:false,players:Array.from({length:n},(_,i)=>({name:`Player ${i}`,avatarUrl:i===1?'missing.png':'photo.png',invested:200000,cashOut:350000-i*30000,net:150000-i*30000,rebuys:1}))});
+test('ten-player export has all ten ranks, full capital, independent net result and loaded photos',async()=>{labels=[];pictures=0;const input=fixture(10),original=JSON.stringify(input);const c=await renderSummaryImage(input);assert.equal(c.width,1080);assert.equal(c.height,1920);for(const p of input.players)assert.ok(labels.some(x=>x.text===p.name));assert.ok(labels.some(x=>x.text==='350.000 Gs.'));assert.ok(labels.some(x=>x.text==='+150.000 Gs.'));assert.ok(pictures>=10);assert.equal(JSON.stringify(input),original);assert.ok(labels.every(x=>x.y<c.height));});
+test('more than ten players extends the export instead of truncating the ranking',async()=>{labels=[];const c=await renderSummaryImage(fixture(12));assert.equal(c.height,2132);assert.ok(labels.some(x=>x.text==='Player 11'));assert.ok(labels.every(x=>x.y<c.height));});
+test('missing photos and historical capital use fallbacks and remain exportable',async()=>{labels=[];const data=fixture(6);data.legacy=true;data.players.forEach(p=>{p.avatarUrl='missing.png';p.cashOut=null;});const c=await renderSummaryImage(data);assert.equal(c.height,1920);assert.equal(labels.filter(x=>x.text==='No registrado').length,6);assert.ok(!labels.some(x=>x.text.includes('NaN')));});

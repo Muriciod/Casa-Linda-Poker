@@ -7,6 +7,7 @@ import Transfers from "./PaymentTools";
 import ParticipantEditor from "./ParticipantEditor";
 import { editParticipant } from "../lib/player-edit";
 import StakeFields from "./StakeFields";
+import { renderSummaryImage } from "../lib/summary-image";
 import { calculateGameStakes, type EntryCurrency, type BuyInBB } from "../lib/game-stakes";
 import { buildPlayerProfiles, type StatisticsFilter } from "../lib/player-statistics";
 
@@ -500,14 +501,27 @@ export default function Home() {
     const textSummary = `${activeGame.name} · Casa Linda Poker\n${[...activeGame.players].sort((a, b) => result(b) - result(a)).map((player, index) => `${index + 1}. ${player.nickname || player.name}: ${result(player) >= 0 ? "+" : ""}${money(result(player))}`).join("\n")}`;
     try { if (typeof navigator.share === "function") { await navigator.share({ title: activeGame.name, text: textSummary }); showToast("Resumen compartido"); } else { await navigator.clipboard.writeText(textSummary); showToast("Resumen copiado"); } } catch { /* diálogo cerrado */ }
   };
-  const downloadSummaryImage = () => {
-    const ranking = [...activeGame.players].sort((a, b) => result(b) - result(a));
-    const rowStep = 122;
-    const canvas = document.createElement("canvas"); canvas.width = 1080; canvas.height = Math.max(1080, 350 + ranking.length * rowStep + 100); const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.fillStyle = "#09090b"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#992224"; ctx.fillRect(0, 0, canvas.width, 12); ctx.fillStyle = "#ffffff"; ctx.font = "700 34px Arial"; ctx.fillText("CASA LINDA POKER", 80, 100); ctx.fillStyle = "#faf9fa"; ctx.font = "700 66px Arial"; ctx.fillText("Resultados de la noche", 80, 190); ctx.fillStyle = "#b0acb5"; ctx.font = "30px Arial"; ctx.fillText(`${activeGame.name} · ${dateTime(activeGame.startedAt)}`, 80, 245);
-    ranking.forEach((player, index) => { const y = 360 + index * rowStep; ctx.fillStyle = "#201e23"; ctx.fillRect(70, y - 62, 940, 100); ctx.fillStyle = "#faf9fa"; ctx.font = "600 34px Arial"; ctx.fillText(`${index + 1}. ${player.nickname || player.name}`, 105, y); ctx.fillStyle = result(player) > 0 ? "#65d6ba" : result(player) < 0 ? "#f2a17a" : "#b0acb5"; ctx.textAlign = "right"; ctx.fillText(`${result(player) > 0 ? "+" : ""}${money(result(player))}`, 970, y); ctx.textAlign = "left"; });
-    ctx.fillStyle = "#b0acb5"; ctx.font = "24px Arial"; ctx.fillText(`${ranking.length} jugadores · Resumen completo`, 80, canvas.height - 45);
-    const link = document.createElement("a"); link.download = `${activeGame.name.toLowerCase().replaceAll(" ", "-")}-resultados.png`; link.href = canvas.toDataURL("image/png"); link.click(); showToast("Resumen descargado como imagen");
+  const imageExportBusy = useRef(false);
+  const downloadSummaryImage = async () => {
+    if (imageExportBusy.current) return;
+    imageExportBusy.current = true;
+    showToast("Preparando imagen y avatares…");
+    try {
+      const canvas = await renderSummaryImage({
+        name: activeGame.name, date: dateTime(activeGame.startedAt), mode: modeLabels[activeGame.mode || "chips"],
+        blinds: activeGame.blinds, duration: activeGame.legacy ? "Histórica" : duration(activeGame.startedAt, activeGame.endedAt),
+        legacy: Boolean(activeGame.legacy),
+        players: activeGame.players.map(player => ({ name: player.nickname || player.name, avatarUrl: avatarUrlForPlayer(player),
+          invested: invested(player), cashOut: Number.isFinite(player.cashOut) ? player.cashOut : null, net: result(player), rebuys: player.movements.filter(m => m.type === "rebuy").length }))
+      });
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("No se pudo exportar la imagen.")), "image/png"));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.download = `${activeGame.name.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}-resultados.png`; link.href = url;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      showToast("Imagen descargada con el resumen completo");
+    } catch { showToast("No se pudo generar la imagen. Volvé a intentarlo."); }
+    finally { imageExportBusy.current = false; }
   };
 
   const selectGame = (game: Game, targetView: View = game.status === "finalized" ? "summary" : "live") => {
