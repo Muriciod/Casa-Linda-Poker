@@ -38,3 +38,11 @@ El modo equilibrado cubre una SB y una BB con fichas distintas. Busca además do
 Dentro de cada nivel minimiza primero las fichas de valor menor que media BB y después el total físico. La búsqueda conjunta usa el inventario como límite, sin techo artificial de 14, 20 o 30; prefiere repartos iguales en empates. Conserva el banco restante. Si llega al presupuesto computacional, devuelve solo una solución comprobada y avisa que no certifica el óptimo. La alternativa Menos fichas mantiene su búsqueda de cantidad mínima y puede requerir cambio.
 
 Las escalas siguen siendo ×100/×1.000. 50.000 Gs. a 100bb implica SB 250 Gs., incompatible con ambas: se informa sin redondear.
+
+## Maletines independientes
+
+El selector abre por defecto Maletín 1. Sus seis denominaciones, dos escalas y datos anteriores permanecen bajo `chip_calculator_v1`. Maletín 2 usa `chip_calculator_case2_v1`, cinco valores monetarios ascendentes y existencias iniciales cero. GET/PUT con `?case=2` seleccionan esa configuración; el servidor valida que el cuerpo y el banco correspondan a ese maletín. Cada clave conserva su propio control de concurrencia y requiere administrador para escribir.
+
+El motor de reparto se instancia con las denominaciones del maletín. Los valores personalizados se normalizan por su MCD únicamente para calcular: nunca se redondean ni se reemplazan. La búsqueda acotada, el reparto global, la prioridad de intermedias y el banco se reutilizan. Para denominaciones sin divisibilidad encadenada se usa búsqueda exacta de pagos y se desactivan las cotas basadas en esa propiedad. Los bancos confirmados conservan su propia instantánea de valores e inventario aunque después se editen las preferencias.
+
+Cambiar de maletín mantiene el borrador del formulario mientras la calculadora está abierta; Guardar configuración persiste sus preferencias para futuras visitas. Los repartos se recalculan al modificar valores y se descartan al cambiar de maletín. Los datos de prueba de existencias no se publican como inventario real.

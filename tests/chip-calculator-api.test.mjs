@@ -11,3 +11,14 @@ test('preferences, confirmed inventory and changes persist; stale writes rejecte
 });
 test('only admin saves, malformed/negative/invented inventory rejected',async()=>{const saved=await (await api.GET()).json();admin=false;assert.equal((await put(saved.state,saved.revision)).status,401);admin=true;const wrong=structuredClone(saved.state);wrong.session.stacks[0][4]=999;assert.equal((await put(wrong,saved.revision)).status,400);assert.equal((await put({config:{...saved.state.config,inventory:[-1,0,0,0,0,0]},session:null},saved.revision)).status,400);assert.deepEqual((await (await api.GET()).json()).state,saved.state);});
 test('backend refuses arbitrary preferences and new arbitrary-scale sessions',async()=>{const saved=await (await api.GET()).json();assert.equal((await put({...saved.state,config:{...saved.state.config,pointValue:60}},saved.revision)).status,400);const forged=structuredClone(saved.state);forged.session.config.pointValue=60;forged.session.config.buyIn=30000;assert.equal((await put(forged,saved.revision)).status,400);assert.deepEqual((await (await api.GET()).json()).state,saved.state);});
+test('color case persists independently, retains old banks after editing values and rejects cross-case writes',async()=>{
+ const url='https://local.test/api/chip-calculator?case=2',get=async()=> (await api.GET(new Request(url))).json();
+ const save=(state,revision)=>api.PUT(new Request(url,{method:'PUT',body:JSON.stringify({state,revision})}));
+ const first=await get(),numbered=await (await api.GET()).json();assert.equal(first.revision,null);assert.deepEqual(first.state.config.inventory,[0,0,0,0,0]);
+ const config={...first.state.config,inventory:[50,50,50,50,50]},r=calc.calculate(config),state={config,session:{config,stacks:r.stacks,changes:[]}};
+ assert.equal((await save(state,null)).status,200);const reload=await get();assert.deepEqual(reload.state,state);assert.deepEqual(await (await api.GET()).json(),numbered);
+ const modified={...state,config:{...config,chipValues:[1000,2000,5000,10000,20000],inventory:[60,70,80,90,100]}};assert.equal((await save(modified,reload.revision)).status,200);const newer=await get();assert.deepEqual(newer.state,modified);assert.deepEqual(calc.sessionBank(newer.state.session),r.bank);
+ assert.equal((await save(state,reload.revision)).status,409);assert.equal((await put(modified,numbered.revision)).status,400);assert.equal((await save(numbered.state,newer.revision)).status,400);
+ admin=false;assert.equal((await save(modified,newer.revision)).status,401);admin=true;
+ const wrong={...modified,config:{...modified.config,chipValues:[5000,5000,20000,50000,100000]}};assert.equal((await save(wrong,newer.revision)).status,400);assert.deepEqual((await get()).state,modified);
+});
