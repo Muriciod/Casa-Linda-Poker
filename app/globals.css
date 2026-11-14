@@ -1964,3 +1964,7 @@ body { background: radial-gradient(ellipse at 80% -8%, #24151c 0%, transparent 3
 .ranking-profile-button { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; }
 .ranking-profile-button strong { text-align: left; min-width: 0; }
 .ranking-row .cashout-player > small { min-width: 0; margin-left: 42px; overflow-wrap: anywhere; }
+
+/* Keep all independent tools accessible in the bottom navigation. */
+.mobile-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.mobile-nav:not(:has(button:nth-child(6))) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
