@@ -14,6 +14,11 @@ export async function PUT(request:Request) {
     const text=await request.text();if(text.length>250000)return json({error:'La configuración es demasiado grande.'},400);
     let body;try{body=JSON.parse(text);validateState(body.state);if(body.revision!==null&&typeof body.revision!=='string')throw Error();}catch{return json({error:'Revisá la configuración y los movimientos del banco.'},400);}
     const db=await ensureAppSchema(),next=JSON.stringify(body.state);
+    if(body.state.session && ![100,1000].includes(body.state.session.config.pointValue)){
+      const current=await db.prepare('SELECT value FROM poker_settings WHERE key = ?').bind(key).first<{value:string}>();
+      const old=current?JSON.parse(current.value).session:null;
+      if(!old||JSON.stringify(old.config)!==JSON.stringify(body.state.session.config)||JSON.stringify(old.stacks)!==JSON.stringify(body.state.session.stacks))return json({error:'Los nuevos repartos solo admiten escalas ×100 y ×1.000.'},400);
+    }
     const row=body.revision===null
       ? await db.prepare('INSERT INTO poker_settings (key,value) VALUES (?,?) ON CONFLICT(key) DO NOTHING RETURNING key').bind(key,next).first()
       : await db.prepare('UPDATE poker_settings SET value=?, updated_at=CURRENT_TIMESTAMP WHERE key=? AND value=? RETURNING key').bind(next,key,body.revision).first();

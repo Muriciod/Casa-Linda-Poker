@@ -1,4 +1,5 @@
 // Standalone physical-chip arithmetic. No game, profile or statistics dependencies.
+export const ALLOWED_SCALES = [100, 1000];
 export const DENOMS = [1, 5, 25, 100, 500, 1000];
 export const INITIAL_INVENTORY = [100, 150, 100, 100, 25, 25];
 export type Config = { equivalence?: "auto" | "manual"; buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
@@ -15,7 +16,18 @@ export function validateConfig(c: Config): string[] {
   return [];
 }
 export function blinds(c: Config) { return {small: c.automatic ? c.buyIn/(c.bb*2) : c.small, big: c.automatic ? c.buyIn/c.bb : c.big}; }
-const gcd = (a: number, b: number): number => b ? gcd(b,a%b) : a;
+export function incompatibleBlinds(c:Config):string {
+  const b=blinds(c);
+  const denomination=DENOMS.find((_,i)=>c.inventory[i]>0);
+  let suggestion='Revisá el inventario o modificá el buy-in.';
+  if(denomination){
+    const unit=denomination*100;
+    const sb=Math.max(unit,Math.round(b.small/unit)*unit),bb=sb*2;
+    if(bb<=c.buyIn&&canPay(sb/100,c.inventory)&&canPay(bb/100,c.inventory))suggestion=`Alternativa con escala baja: SB ${sb.toLocaleString('es-PY')} Gs. / BB ${bb.toLocaleString('es-PY')} Gs.; el stack sería ${(c.buyIn/bb).toLocaleString('es-PY',{maximumFractionDigits:4})}bb. Podés ingresar estas ciegas en Opciones avanzadas; no se aplican automáticamente.`;
+  }
+  return `El buy-in o las ciegas (${b.small.toLocaleString('es-PY')} / ${b.big.toLocaleString('es-PY')} Gs.) no son compatibles con la equivalencia seleccionada. Solo usamos ×100 y ×1.000; la ficha mínima vale 100 Gs. No es posible mantener todas las condiciones actuales. ${suggestion}`;
+}
+
 // Bounded change enumeration with pruning, not greedy. All returned vectors are exact.
 function patterns(target: number, stock: number[], cap: number, tick: () => void): number[][] {
   const out: number[][] = [], row = [0,0,0,0,0,0];
@@ -46,13 +58,13 @@ function readyForBlinds(row: number[], small: number, big: number) {
 }
 export type Result = {config: Config; stacks: number[][]; bank: number[]; warnings: string[]; optimal: boolean; balanced: boolean; reserve: boolean};
 export function calculate(c: Config): Result {
+  if(!ALLOWED_SCALES.includes(c.pointValue))throw Error("Solo se permiten las escalas ×100 y ×1.000.");
   const issues=validateConfig(c);if(issues.length)throw Error(issues[0]);
   const {small,big}=blinds(c), target=c.buyIn/c.pointValue;
   if(!integer(small)||!integer(big))throw Error('Las ciegas automáticas no son guaraníes enteros. Ajustá el buy-in o usá ciegas manuales.');
   if(small>big || big>c.buyIn)throw Error('La SB debe ser menor o igual a la BB, y la BB no puede superar el stack.');
   if(!integer(target)||!integer(small/c.pointValue)||!integer(big/c.pointValue)) {
-    const suggestion=gcd(gcd(c.buyIn,small),gcd(big,c.pointValue));
-    throw Error(`El buy-in o las ciegas no se pueden representar con esta equivalencia. Probá 1 punto = ${suggestion.toLocaleString('es-PY')} Gs. o ajustá las ciegas.`);
+    throw Error(incompatibleBlinds(c));
   }
   const sb=small/c.pointValue, bb=big/c.pointValue;
   if(!canPay(sb,c.inventory)||!canPay(bb,c.inventory))throw Error('El inventario no permite pagar exactamente las ciegas. Agregá denominaciones pequeñas o ajustá las ciegas.');
@@ -72,7 +84,7 @@ export function calculate(c: Config): Result {
       tick();if(!left){if(total<cost){best=rows.map(r=>[...r]);cost=total;}return;}
       if(value(stock)<left*target)return;
       const key=left+':'+start+':'+stock.join(',');if((seen.get(key)??Infinity)<=total)return;seen.set(key,total);
-      for(let k=start;k<choices.length;k++){const row=choices[k], next=total+count(row);if(total+count(row)*left>=cost)break;if(row.some((n,i)=>n>stock[i]))continue;pack(left-1,subtract(stock,row),k,next,[...rows,row]);}
+      for(let k=start;k<choices.length;k++){tick();const row=choices[k], next=total+count(row);if(total+count(row)*left>=cost)break;if(row.some((n,i)=>n>stock[i]))continue;pack(left-1,subtract(stock,row),k,next,[...rows,row]);}
     }
     try{pack(c.players,pool,0,0,[]);}catch(e){if(!interrupted)throw e;if(!best)throw Error('No se pudo completar la búsqueda con este inventario. Ajustá el buy-in o las cantidades; no se confirmó que el reparto sea imposible.');}
     return best ? {stacks:best,optimal:!interrupted}:null;
@@ -123,16 +135,14 @@ export function sessionBank(s: Session): number[] {
   let bank=s.stacks.reduce((a,r)=>subtract(a,r),[...s.config.inventory]);if(bank.some(x=>x<0))throw Error('El reparto excede el inventario.');
   for(const change of s.changes){if(!change || !Number.isInteger(change.denomination) || (s.config.inventory[change.denomination]??0)-bank[change.denomination]<1)throw Error("La ficha recibida no está en circulación.");bank=applyChange(bank,change);}return bank;
 }
-export function validateState(state:SavedState) {if(!state||validateConfig(state.config).length)throw Error('Configuración no válida.');if(state.session!==null)sessionBank(state.session);return state;}
+export function validateState(state:SavedState) {if(!state||validateConfig(state.config).length||!ALLOWED_SCALES.includes(state.config.pointValue))throw Error('Configuración no válida.');if(state.session!==null)sessionBank(state.session);return state;}
 
 export function recommend(input:Config & {equivalence?:'auto'|'manual'}): {label:string;reason:string;result:Result}[] {
   const b=blinds(input);
   if(!Number.isSafeInteger(b.small)||!Number.isSafeInteger(b.big)||b.small<=0||b.big<=0)throw Error('Las ciegas deben ser guaraníes enteros positivos. Ajustá el buy-in o las opciones avanzadas.');
-  if(!input.automatic&&input.buyIn!==b.big*input.bb)throw Error(`Estas ciegas dan ${input.buyIn/b.big}bb. Ajustá la BB a ${input.buyIn/input.bb} Gs. para mantener ${input.bb}bb.`);
-  if(input.equivalence==='manual')return [{label:'Configuración manual',reason:'Equivalencia definida por vos, validada contra el inventario.',result:calculate(input)}];
-  const unit=gcd(gcd(input.buyIn,b.small),b.big), candidates=new Set<number>();
-  // Test exact divisors at multiple practical blind sizes, including values below SB.
-  for(let d=1;d<=20;d++)if(unit%d===0)candidates.add(unit/d);
+  if(input.equivalence==='manual')return [{label:input.pointValue===100?'Escala baja':'Escala alta',reason:'Escala seleccionada manualmente, validada contra el inventario.',result:calculate(input)}];
+  const candidates=ALLOWED_SCALES;
+  if(!candidates.some(scale=>[input.buyIn,b.small,b.big].every(n=>n%scale===0)))throw Error(incompatibleBlinds(input));
   const results:Result[]=[];let incomplete=false;
   for(const pointValue of candidates)for(const mode of ['balanced','minimum'] as const){try{results.push(calculate({...input,pointValue,mode}));}catch(e){if(/búsqueda/.test(String(e)))incomplete=true;}}
   if(!results.length)throw Error(incomplete?'No se pudo completar la búsqueda. Probá una equivalencia manual.':'No hay repartos viables entre las equivalencias evaluadas. Revisá el inventario o probá el modo manual.');

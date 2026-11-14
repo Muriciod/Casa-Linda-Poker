@@ -24,3 +24,9 @@ Los cambios se aplican al banco confirmado mediante un registro reproducible. De
 `node --test tests/chip-calculator*.test.mjs` cubre 2–10 jugadores, equivalencia, ciegas incompatibles, falta de stock, repartos diferentes, alternativas de 15+, conservación, reversión, permisos, persistencia y concurrencia. Incluye comparación con un oráculo exhaustivo independiente para inventarios pequeños.
 
 Prueba visual local: worker en navegador, copiar reparto, confirmar, registrar cambio, recargar, deshacer y vista en iframe de 390px. Las fichas son CSS basado en colores/valores aportados, sin fotografía de referencia en el adjunto.
+
+## Escalas permitidas
+
+Los nuevos cálculos y preferencias solo admiten ×100 o ×1.000. Automático evalúa ambas con los dos modos de reparto; manual selecciona una escala cerrada. Ciegas incompatibles generan una sugerencia explícita con las bb reales, nunca un redondeo aplicado. Las ciegas manuales pueden diferir de 50/100bb, con advertencia visible.
+
+Los bancos confirmados con una escala anterior se conservan y se identifican como tales. El servidor permite continuar sus movimientos, pero no crear ni alterar un reparto con una escala retirada. El límite de búsqueda cuenta también cada candidato de la asignación conjunta para evitar bloqueos en inventarios complejos.
