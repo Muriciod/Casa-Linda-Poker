@@ -25,3 +25,4 @@ test('minimum allocation agrees with exhaustive small-inventory oracle',()=>{
   if(best===Infinity)assert.throws(()=>c.calculate(cfg));else{const r=c.calculate(cfg);invariants(r);assert.equal(r.stacks.reduce((n,row)=>n+c.count(row),0),best);}
  }
 });
+test('automatic alternatives are exact across buy-ins, players and stack sizes; manual remains available',()=>{for(const buyIn of [20000,500000])for(const players of [2,10])for(const bb of [50,100]){const options=c.recommend(config({buyIn,players,bb}));assert.ok(options.length>=1&&options.length<=3);for(const a of options){invariants(a.result);const b=c.blinds(a.result.config);assert.ok(c.canPay(b.small/a.result.config.pointValue,a.result.config.inventory));assert.ok(c.canPay(b.big/a.result.config.pointValue,a.result.config.inventory));}}assert.equal(c.recommend(config({equivalence:'manual'}))[0].result.config.pointValue,1000);assert.throws(()=>c.recommend(config({automatic:false,big:5000})),/mantener/);});

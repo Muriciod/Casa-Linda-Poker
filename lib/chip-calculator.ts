@@ -1,7 +1,7 @@
 // Standalone physical-chip arithmetic. No game, profile or statistics dependencies.
 export const DENOMS = [1, 5, 25, 100, 500, 1000];
 export const INITIAL_INVENTORY = [100, 150, 100, 100, 25, 25];
-export type Config = { buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
+export type Config = { equivalence?: "auto" | "manual"; buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
 export const DEFAULT_CONFIG: Config = { buyIn: 500000, players: 6, bb: 50, automatic: true, small: 5000, big: 10000, pointValue: 1000, mode: 'balanced', inventory: [...INITIAL_INVENTORY] };
 export const count = (a: number[]) => a.reduce((s, x) => s + x, 0);
 export const value = (a: number[]) => a.reduce((s, x, i) => s + x * DENOMS[i], 0);
@@ -37,6 +37,7 @@ export function canPay(target: number, stock: number[]) {
   return target===0;
 }
 function readyForBlinds(row: number[], small: number, big: number) {
+  if(!canPay(small,row)||!canPay(big,row)||!canPay(small+big,row))return false;
   // Small denominations first preserve larger chips for BB; try exact SB subsets.
   let ready=false;
   const options=patterns(small,row,count(row),()=>{});
@@ -123,3 +124,25 @@ export function sessionBank(s: Session): number[] {
   for(const change of s.changes){if(!change || !Number.isInteger(change.denomination) || (s.config.inventory[change.denomination]??0)-bank[change.denomination]<1)throw Error("La ficha recibida no está en circulación.");bank=applyChange(bank,change);}return bank;
 }
 export function validateState(state:SavedState) {if(!state||validateConfig(state.config).length)throw Error('Configuración no válida.');if(state.session!==null)sessionBank(state.session);return state;}
+
+export function recommend(input:Config & {equivalence?:'auto'|'manual'}): {label:string;reason:string;result:Result}[] {
+  const b=blinds(input);
+  if(!Number.isSafeInteger(b.small)||!Number.isSafeInteger(b.big)||b.small<=0||b.big<=0)throw Error('Las ciegas deben ser guaraníes enteros positivos. Ajustá el buy-in o las opciones avanzadas.');
+  if(!input.automatic&&input.buyIn!==b.big*input.bb)throw Error(`Estas ciegas dan ${input.buyIn/b.big}bb. Ajustá la BB a ${input.buyIn/input.bb} Gs. para mantener ${input.bb}bb.`);
+  if(input.equivalence==='manual')return [{label:'Configuración manual',reason:'Equivalencia definida por vos, validada contra el inventario.',result:calculate(input)}];
+  const unit=gcd(gcd(input.buyIn,b.small),b.big), candidates=new Set<number>();
+  // Test exact divisors at multiple practical blind sizes, including values below SB.
+  for(let d=1;d<=20;d++)if(unit%d===0)candidates.add(unit/d);
+  const results:Result[]=[];let incomplete=false;
+  for(const pointValue of candidates)for(const mode of ['balanced','minimum'] as const){try{results.push(calculate({...input,pointValue,mode}));}catch(e){if(/búsqueda/.test(String(e)))incomplete=true;}}
+  if(!results.length)throw Error(incomplete?'No se pudo completar la búsqueda. Probá una equivalencia manual.':'No hay repartos viables entre las equivalencias evaluadas. Revisá el inventario o probá el modo manual.');
+  const compact=(r:Result)=>Math.max(...r.stacks.map(count))>14?1:0;
+  const total=(r:Result)=>r.stacks.reduce((s,row)=>s+count(row),0);
+  const liquidity=(r:Result)=>r.bank.reduce((s,n,i)=>s+(DENOMS[i]*r.config.pointValue<=b.big?n:0),0);
+  const equal=(r:Result)=>r.stacks.every(row=>row.join()===r.stacks[0].join())?0:1;
+  const recommended=[...results].sort((a,b)=>compact(a)-compact(b)||Number(b.balanced)-Number(a.balanced)||Number(b.reserve)-Number(a.reserve)||total(a)-total(b)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
+  const minimum=[...results].sort((a,b)=>compact(a)-compact(b)||total(a)-total(b)||equal(a)-equal(b))[0];
+  const change=[...results].sort((a,b)=>compact(a)-compact(b)||Number(b.balanced)-Number(a.balanced)||liquidity(b)-liquidity(a)||total(a)-total(b))[0];
+  const seen=new Set<string>();
+  return [{label:'Recomendada',reason:'Prioriza stacks de hasta 14 fichas, pago de ciegas y reserva de cambio.',result:recommended},{label:'Menos fichas',reason:'La menor cantidad física entre las configuraciones evaluadas; puede requerir cambios.',result:minimum},{label:'Más cambio',reason:'Prioriza fichas del banco con valor menor o igual a la BB.',result:change}].filter(x=>{const key=x.result.config.pointValue+JSON.stringify(x.result.stacks);if(seen.has(key))return false;seen.add(key);if(incomplete)x.result.warnings.push('Algunas búsquedas alcanzaron su límite; se comparan las soluciones verificadas.');return true;});
+}
