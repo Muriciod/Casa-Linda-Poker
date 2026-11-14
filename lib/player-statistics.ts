@@ -1,5 +1,5 @@
 // Shared by the statistics UI and the visibility API. No historical records are changed.
-export type StatisticsPlayer = { id: string; name: string; nickname?: string; cashOut: number | null; legacyResult?: number; movements: { type: string; amount: number }[] };
+export type StatisticsPlayer = { id: string; name: string; statisticsName?: string; statisticsNickname?: string; nickname?: string; cashOut: number | null; legacyResult?: number; movements: { type: string; amount: number }[] };
 export type StatisticsGame = { id: string; name: string; mode?: "chips" | "cash" | "temporary"; status: string; startedAt: string; blinds: string; legacy?: boolean; players: StatisticsPlayer[] };
 export type StatisticsRoster = { id: string; name: string; nickname?: string; kind: string; avatarUrl?: string };
 export type PlayerSession = { game: StatisticsGame; player: StatisticsPlayer };
@@ -9,7 +9,7 @@ export type StatisticsFilter = { mode: "chips" | "cash" | "all"; from: string; t
 export const normalizePlayerName = (value: string) => String(value || "")
   .replaceAll("Ã¡", "á").replaceAll("Ã©", "é").replaceAll("Ã­", "í").replaceAll("Ã³", "ó").replaceAll("Ãº", "ú").replaceAll("Ã±", "ñ").replaceAll("Â", "")
   .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-const aliases = (player: { name: string; nickname?: string }) => [...new Set([player.name, player.nickname || ""].map(normalizePlayerName).filter(Boolean))];
+const aliases = (player: { name: string; nickname?: string; statisticsName?: string; statisticsNickname?: string }) => [...new Set([player.statisticsName || player.name, (player.statisticsName ? player.statisticsNickname : player.nickname) || ""].map(normalizePlayerName).filter(Boolean))];
 
 export function buildPlayerProfiles(games: StatisticsGame[], roster: StatisticsRoster[]): PlayerProfile[] {
   const profiles = new Map<string, PlayerProfile>();
@@ -33,7 +33,7 @@ export function buildPlayerProfiles(games: StatisticsGame[], roster: StatisticsR
         const matches = new Set(aliases(player).flatMap(alias => [...(names.get(alias) || [])]));
         if (matches.size === 1) entry = rosterById.get([...matches][0]);
       }
-      const key = entry ? `id:${entry.id}` : `name:${normalizePlayerName(player.name || player.nickname || player.id)}`;
+      const key = entry ? `id:${entry.id}` : `name:${normalizePlayerName(player.statisticsName || player.name || player.nickname || player.id)}`;
       const profile = ensure(key, player, entry);
       profile.sessions.push({ game, player });
       profile.identityKeys.push(`id:${player.id}`);

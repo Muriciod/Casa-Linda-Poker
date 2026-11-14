@@ -94,7 +94,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run dev`: start the Vite/Vinext development server
 - `npm run build`: build and validate the deployable Sites artifact
 - `npm run start`: start the built Vinext application
-- `npm test`: build, validate, and verify the rendered development-preview metadata
+- `npm test`: build, validate, and run all regression tests in `tests/`
 - `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
@@ -106,3 +106,17 @@ The timeout defaults can be overridden for a controlled canary with `SITES_INSTA
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+
+## Administración de participantes y pagos
+
+- En una mesa activa, **Editar jugador** permite reemplazar por un perfil existente, corregir el nombre visible en esa mesa o quitar una participación. Las tres acciones requieren confirmación. Reemplazar conserva todos los movimientos y el cash-out. Eliminar retira únicamente los movimientos de esa participación. Las otras partidas y el registro del jugador quedan intactos.
+- Para una sesión cerrada, usar **Reabrir para corregir** antes de editar participantes. Las sesiones históricas importadas que no contienen movimientos detallados conservan sus restricciones de edición.
+- En **Estadísticas → Perfil → Alias**, el administrador puede guardar, cambiar, borrar y copiar el alias bancario. También puede hacerlo desde **Resultados → Transferencias**.
+- Los alias y los pagos viven en tablas privadas separadas (`poker_bank_aliases`, `poker_transfers`). Los endpoints públicos de partidas y jugadores no incorporan esos datos. Las rutas privadas verifican la sesión de administrador y el origen de la petición.
+- Cada pago se identifica por partida y jugador, y registra el importe confirmado. Usa `cashOut`, ya normalizado a guaraníes por las reglas existentes, sin volver a convertir USD ni restar la inversión. Si cambia el capital, la marca del importe anterior deja de mostrarse como completada.
+- El capital cero no genera un pago pendiente. Si una sesión antigua solo tiene resultado neto, se muestra capital no registrado y se excluye de los totales de transferencias. Las sesiones temporales no generan perfiles bancarios ni registros de pagos.
+- Las transferencias son un registro manual: marcar una casilla no envía dinero.
+
+La migración aditiva `drizzle/0004_abandoned_network.sql` crea las dos tablas nuevas sin modificar los historiales. Al reconstruir fuera de Sites, aplicar las migraciones de `drizzle/` en orden a la base D1 antes de servir la nueva versión. No incluir archivos `.dev.vars`, `.env*` ni bases locales en el repositorio.
+
+Verificación: `tests/player-management.test.mjs` cubre reemplazo, duplicados, eliminación, identidad después de renombrar, conflictos simultáneos, alias, capital completo, pagos independientes, cambios de capital, sesiones temporales y autorización. Las otras suites conservan la cobertura de modalidades, conversión, estadísticas y renderizado.

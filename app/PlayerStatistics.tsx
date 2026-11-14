@@ -6,6 +6,7 @@ import {
   type PlayerProfile, type PlayerSession, type StatisticsFilter, type StatisticsGame, type StatisticsRoster,
 } from "../lib/player-statistics";
 import "./player-statistics.css";
+import { AliasEditor } from "./PaymentTools";
 
 const modes = ["chips", "cash"] as const;
 const filterModes = [...modes, "all"] as const;
@@ -272,6 +273,7 @@ export default function PlayerStatistics({ games, roster, canEdit, onUpload, onO
           }} />
         </label>}
       </div>
+      {canEdit && <AliasEditor key={selected.key} profileKey={selected.key} />}
       {!invalidRange && <>
         <div className={`profile-metric-grid ${filter.mode === "all" ? "both" : ""}`}>
           {modesFor(filter.mode).map(mode => <Metrics key={mode} mode={mode} sessions={sessions.filter(s => (s.game.mode || "chips") === mode)} />)}

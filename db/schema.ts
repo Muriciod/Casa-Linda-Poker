@@ -33,3 +33,16 @@ export const pokerSettings = sqliteTable("poker_settings", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const pokerBankAliases = sqliteTable("poker_bank_aliases", {
+  profileKey: text("profile_key").primaryKey(),
+  alias: text("alias").notNull().default(""),
+});
+export const pokerTransfers = sqliteTable("poker_transfers", {
+  id: text("id").primaryKey(),
+  gameId: text("game_id").notNull(),
+  playerId: text("player_id").notNull(),
+  amount: integer("amount").notNull(),
+  completed: integer("completed").notNull().default(0),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
