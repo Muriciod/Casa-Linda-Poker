@@ -39,7 +39,17 @@ test('playability outranks chip count and stock remains exact across requested t
   const r=c.recommend(config({buyIn,players,bb}))[0].result;invariants(r);assert.ok(r.comfort>=1,JSON.stringify({buyIn,players,bb,warnings:r.warnings}));const b=c.blinds(r.config);for(const row of r.stacks)assert.ok(c.canFundPayments(row,c.openingPayments(b.small/r.config.pointValue,b.big/r.config.pointValue,r.comfort)));assert.ok(!r.warnings.some(w=>w.includes('14')));
  }
  assert.throws(()=>c.recommend(config({buyIn:50000,bb:100})),/compatibles/);
- const comfortable=c.calculate(config({buyIn:20000,players:2,pointValue:100}));assert.equal(comfortable.comfort,3);assert.ok(comfortable.stacks.some(row=>c.count(row)>14));
- const many=c.calculate(config({buyIn:4000,pointValue:100,players:2,automatic:false,small:100,big:200,inventory:[80,0,0,0,0,0]}));invariants(many);assert.equal(c.count(many.stacks[0]),40);assert.equal(many.comfort,3);
+ const comfortable=c.calculate(config({buyIn:20000,players:2,pointValue:100}));assert.equal(comfortable.comfort,3);assert.ok(comfortable.stacks.every(row=>row[0]<=10&&row[1]>=2));
+ const many=c.calculate(config({buyIn:4000,pointValue:100,players:2,automatic:false,small:100,big:200,inventory:[80,0,0,0,0,0]}));invariants(many);assert.equal(c.count(many.stacks[0]),40);assert.equal(many.comfort,1);
  const scarce=c.calculate(config({buyIn:20000,players:10,pointValue:100,inventory:[8,150,100,100,25,25]}));invariants(scarce);assert.equal(scarce.comfort,0);assert.ok(scarce.warnings.some(w=>w.includes('inventario')));
 });
+
+ test('betting chips complement exact blinds without excessive whites, 2–10 players',()=>{
+ for(const buyIn of [20000,30000,100000])for(let players=2;players<=10;players++){
+ const r=c.calculate(config({buyIn,players,pointValue:100,bb:50}));invariants(r);
+ const b=c.blinds(r.config);for(const row of r.stacks){assert.ok(c.bettingReady(row,b.small/100,b.big/100,r.comfort));assert.ok(c.canFundPayments(row,[b.small/100,b.big/100]));if(buyIn<=30000)assert.ok(row[0]<=10);}
+ }
+ assert.equal(c.canPay(4,[0,1,0,0,0,0]),false);
+ assert.equal(c.bettingDenomination(4),1);
+ for(let players=2;players<=10;players++)assert.throws(()=>c.recommend(config({buyIn:50000,players,bb:100})),/compatibles/);
+ });

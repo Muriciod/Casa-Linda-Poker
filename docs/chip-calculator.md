@@ -31,10 +31,10 @@ Los nuevos cálculos y preferencias solo admiten ×100 o ×1.000. Automático ev
 
 Los bancos confirmados con una escala anterior se conservan y se identifican como tales. El servidor permite continuar sus movimientos, pero no crear ni alterar un reparto con una escala retirada. El límite de búsqueda cuenta también cada candidato de la asignación conjunta para evitar bloqueos en inventarios complejos.
 
-## Comodidad antes que cantidad
+## Utilidad de las fichas según las ciegas
 
-El modo equilibrado intenta, para todos los jugadores, estos niveles en orden: dos SB + dos BB + call de una BB + apuesta de dos BB; dos SB + dos BB; una SB + una BB; reparto con cambio. Se comprueba que puedan pagarse sin reutilizar fichas. Son escenarios iniciales de comodidad, no una promesa sobre todas las apuestas futuras.
+El modo equilibrado cubre una SB y una BB con fichas distintas. Busca además dos fichas intermedias, o una si el inventario no permite dos, reservadas aparte de las ciegas. Selecciona una denominación entre media BB y cuatro BB: prefiere múltiplos exactos y después la más cercana. Esta cantidad acotada evita llenar el stack con intermedias. Una roja de 500 Gs. nunca se considera un pago exacto de BB 400 Gs.
 
-La búsqueda aumenta la cantidad permitida hasta el límite físico del inventario, sin techo de 14/20/30. Usa cotas de disponibilidad global de denominaciones pequeñas, memoización y una solución inicial obtenida por programación dinámica acotada. Prefiere reparto común cuando es viable. Si la exploración alcanza su límite computacional, puede devolver esa solución exacta y jugable con aviso de optimalidad no certificada. Las 14 fichas solo distinguen visualmente un reparto compacto de uno ampliado. Se minimiza primero la mayor cantidad por jugador dentro del nivel de comodidad y después el total dentro de esa cota; el banco conserva el remanente real.
+Dentro de cada nivel minimiza primero las fichas de valor menor que media BB y después el total físico. La búsqueda conjunta usa el inventario como límite, sin techo artificial de 14, 20 o 30; prefiere repartos iguales en empates. Conserva el banco restante. Si llega al presupuesto computacional, devuelve solo una solución comprobada y avisa que no certifica el óptimo. La alternativa Menos fichas mantiene su búsqueda de cantidad mínima y puede requerir cambio.
 
-Las escalas continúan siendo únicamente ×100/×1.000. 50.000 Gs. a 100bb tiene SB de 250 Gs., incompatible con ambas, y debe seguir rechazándose.
+Las escalas siguen siendo ×100/×1.000. 50.000 Gs. a 100bb implica SB 250 Gs., incompatible con ambas: se informa sin redondear.
