@@ -118,7 +118,7 @@ function seedAllocation(target:number,stock:number[],players:number,payments:num
   const equal=take(stock.map(n=>Math.floor(n/players)),1);if(equal)return Array.from({length:players},()=>[...equal[0]]);
   return take(stock,players);
 }
-function calculate(c: Config): Result {
+function calculate(c: Config, moreChange=false): Result {
   if(c.caseId!==2&&!ALLOWED_SCALES.includes(c.pointValue))throw Error("Solo se permiten las escalas ×100 y ×1.000.");
   const issues=validateConfig(c);if(issues.length)throw Error(issues[0]);
   if(c.caseId===2&&!count(c.inventory))throw Error('Completá el inventario del Maletín 2 antes de calcular. No se han asignado cantidades.');
@@ -133,7 +133,7 @@ function calculate(c: Config): Result {
   if(value(c.inventory)<target*c.players)throw Error('Inventario insuficiente para cubrir el buy-in de todos los jugadores.');
   const intermediate=bettingDenomination(bb);
   const weight=count(c.inventory)+1;
-  const rowCost=(row:number[])=>c.mode==='minimum'?count(row):row.reduce((n,q,i)=>n+(DENOMS[i]<bb/2?q:0),0)*weight+count(row);
+  const rowCost=(row:number[])=>c.mode==='minimum'?count(row):(moreChange&&intermediate>=0?Math.max(0,6-row[intermediate])*weight*weight:0)+row.reduce((n,q,i)=>n+(DENOMS[i]<bb/2?q:0),0)*weight+count(row);
   let steps=0, interrupted=false;
   const tick=()=>{if(++steps>2000000){interrupted=true;throw Error('La búsqueda alcanzó su límite. Ajustá el buy-in o el inventario para poder verificar el reparto.');}};
   function solve(pool: number[], cap: number, comfort: number): {stacks:number[][]; optimal:boolean}|null {
@@ -209,24 +209,23 @@ function sessionBank(s: Session): number[] {
 function validateState(state:SavedState) {if(!state||validateConfig(state.config).length||(state.config.caseId!==2&&!ALLOWED_SCALES.includes(state.config.pointValue)))throw Error('Configuración no válida.');if(state.session!==null){if(caseId(state.session.config)!==caseId(state.config))throw Error('El banco pertenece a otro maletín.');engine(state.session.config).sessionBank(state.session);};return state;}
 
 function recommend(input:Config & {equivalence?:'auto'|'manual'}): {label:string;reason:string;result:Result}[] {
-  if(input.caseId===2){const recommended=calculate({...input,mode:input.mode});const out=[{label:input.mode==='minimum'?'Menos fichas':'Recomendada',reason:'Valores personalizados; ciegas exactas y existencias del Maletín 2.',result:recommended}];if(input.mode!=='minimum'){try{const r=calculate({...input,mode:'minimum'});if(JSON.stringify(r.stacks)!==JSON.stringify(recommended.stacks))out.push({label:'Menos fichas',reason:'Alternativa compacta; puede requerir cambios.',result:r});}catch{/* Keep verified recommendation. */}}return out;}
+  input={...input,mode:'balanced'};
+  if(input.caseId===2)return practicalAlternatives(calculate(input));
   const b=blinds(input);
   if(!Number.isSafeInteger(b.small)||!Number.isSafeInteger(b.big)||b.small<=0||b.big<=0)throw Error('Las ciegas deben ser guaraníes enteros positivos. Ajustá el buy-in o las opciones avanzadas.');
-  if(input.equivalence==='manual')return [{label:input.pointValue===100?'Escala baja':'Escala alta',reason:'Escala seleccionada manualmente, validada contra el inventario.',result:calculate(input)}];
+  if(input.equivalence==='manual')return practicalAlternatives(calculate(input));
   const candidates=ALLOWED_SCALES;
   if(!candidates.some(scale=>[input.buyIn,b.small,b.big].every(n=>n%scale===0)))throw Error(incompatibleBlinds(input));
   const results:Result[]=[];let incomplete=false;
-  for(const pointValue of candidates)for(const mode of ['balanced','minimum'] as const){try{results.push(calculate({...input,pointValue,mode}));}catch(e){if(/búsqueda/.test(String(e)))incomplete=true;}}
+  for(const pointValue of candidates){try{results.push(calculate({...input,pointValue,mode:'balanced'}));}catch(e){if(/búsqueda/.test(String(e)))incomplete=true;}}
   if(!results.length)throw Error(incomplete?'No se pudo completar la búsqueda. Probá una equivalencia manual.':'No hay repartos viables entre las equivalencias evaluadas. Revisá el inventario o probá el modo manual.');
   const total=(r:Result)=>r.stacks.reduce((s,row)=>s+count(row),0);
   const liquidity=(r:Result)=>r.bank.reduce((s,n,i)=>s+(DENOMS[i]*r.config.pointValue<=b.big?n:0),0);
   const equal=(r:Result)=>r.stacks.every(row=>row.join()===r.stacks[0].join())?0:1;
   const tiny=(r:Result)=>r.stacks.reduce((sum,row)=>sum+row.reduce((n,q,i)=>n+(DENOMS[i]*r.config.pointValue<b.big/2?q:0),0),0);
   const recommended=[...results].sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||total(a)-total(b)||Number(b.reserve)-Number(a.reserve)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
-  const minimum=[...results].sort((a,b)=>total(a)-total(b)||equal(a)-equal(b))[0];
-  const change=[...results].sort((a,b)=>b.comfort-a.comfort||liquidity(b)-liquidity(a)||total(a)-total(b))[0];
-  const seen=new Set<string>();
-  return [{label:'Recomendada',reason:'Cubre SB y BB, reserva fichas intermedias para apostar y reduce las fichas pequeñas.',result:recommended},{label:'Menos fichas',reason:'La menor cantidad física entre las configuraciones evaluadas; puede requerir cambios.',result:minimum},{label:'Más cambio',reason:'Prioriza fichas del banco con valor menor o igual a la BB.',result:change}].filter(x=>{const key=x.result.config.pointValue+JSON.stringify(x.result.stacks);if(seen.has(key))return false;seen.add(key);if(incomplete)x.result.warnings.push('Algunas búsquedas alcanzaron su límite; se comparan las soluciones verificadas.');return true;});
+  if(incomplete)recommended.warnings.push('Algunas búsquedas alcanzaron su límite; se comparan las soluciones verificadas.');
+  return practicalAlternatives(recommended);
 }
 return {validCounts,validateConfig,blinds,incompatibleBlinds,canPay,canFundPayments,bettingDenomination,openingPayments,bettingReady,calculate,changeOptions,applyChange,sessionBank,validateState,recommend,count,value,subtract,add};
 }
@@ -238,6 +237,7 @@ export const validateConfig=(c:Config)=>engine(c).validateConfig(c);
 export const incompatibleBlinds=(c:Config)=>engine(c).incompatibleBlinds(c);
 export const calculate=(c:Config)=>engine(c).calculate(c);
 export function recommend(c:Config){
+ c={...c,mode:'balanced'};
  if(c.caseId!==2||c.autoValues===false)return engine(c).recommend(c);
  const issues=validateConfig(c);if(issues.length)throw Error(issues[0]);
  if(!count(c.inventory))throw Error('Completá el inventario del Maletín 2 antes de calcular.');
@@ -260,7 +260,18 @@ export function recommend(c:Config){
  const tiny=(r:Result)=>r.stacks.reduce((s,row)=>s+row.reduce((n,q,i)=>n+(chipValues(r.config)[i]<big/2?q:0),0),0);
  results.sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||count(a.stacks.flat())-count(b.stacks.flat())||Number(b.reserve)-Number(a.reserve));
  const result=results[0];if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
- return [{label:'Recomendada',reason:'Valores simples de la serie 1–2–5 (100, 200, 500, 1.000…). Se eligen según buy-in, ciegas e inventario, sin redondear el stack.',result}];
+ return practicalAlternatives(result);
+}
+// Both choices keep blind feasibility ahead of chip count. Legacy minimum configs
+// remain readable for confirmed banks, but are never offered for new recommendations.
+function practicalAlternatives(result:Result){
+ let change:Result;
+ try{change=engine(result.config).calculate({...result.config,mode:'balanced'},true);}catch{change=structuredClone(result);}
+ const same=JSON.stringify(change.stacks)===JSON.stringify(result.stacks);
+ return [
+  {label:'Recomendada',reason:'Prioriza ciegas, apuestas habituales y pocas fichas pequeñas; reduce el total sin sacrificar comodidad.',result},
+  {label:'Más cambio',reason:same?'El reparto recomendado ya es la mejor opción de cambio encontrada con estas existencias.':'Incluye más fichas intermedias para apostar y dar cambio, evitando acumular fichas mínimas.',result:change}
+ ];
 }
 export const changeOptions=(bank:number[],denomination:number,c?:Config)=>engine(c).changeOptions(bank,denomination);
 export const applyChange=(bank:number[],change:Change,c?:Config)=>engine(c).applyChange(bank,change);

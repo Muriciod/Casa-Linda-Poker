@@ -58,3 +58,22 @@ test('automatic color values follow buy-in, both blinds modes and inventory whil
 });
 
 test('40k eight-player regression excludes 400/800/1600/4000/8000 chip values',()=>{const r=c.recommend(config({buyIn:40000,players:8,autoValues:true}))[0].result;exact(r);assert.ok(r.config.chipValues.every(v=>![400,800,1600,4000,8000].includes(v)));assert.equal(c.blinds(r.config).small,400);assert.equal(c.blinds(r.config).big,800);});
+
+test('only practical alternatives, including legacy minimum preferences, preserve exact stock and playable stacks',()=>{
+ const inputs=[
+  {...structuredClone(c.DEFAULT_CONFIG),buyIn:80000,players:6,mode:'minimum'},
+  {...structuredClone(c.DEFAULT_CONFIG),buyIn:20000,players:10,equivalence:'manual',pointValue:100,mode:'minimum'},
+  config({buyIn:1000000,players:8,autoValues:false,mode:'minimum'}),
+  config({buyIn:40000,players:8,autoValues:true,mode:'minimum'})
+ ];
+ for(const input of inputs){const before=structuredClone(input);const options=c.recommend(input);assert.deepEqual(options.map(x=>x.label),['Recomendada','Más cambio']);assert.deepEqual(input,before);
+  for(const {result:r} of options){exact(r);assert.equal(r.config.mode,'balanced');assert.ok(r.comfort>0);const values=c.chipValues(r.config),b=c.blinds(r.config);for(const row of r.stacks){assert.ok(row.reduce((a,b)=>a+b,0)>1);assert.ok(payable(row,values,b.small));assert.ok(payable(row,values,b.big));}}
+  assert.ok(options[1].result.comfort>=options[0].result.comfort);
+ }
+});
+test('more change increases useful intermediate chips without changing the scale or excessive whites',()=>{
+ const options=c.recommend(config({buyIn:1000000,players:6,autoValues:false}));const a=options[0].result,b=options[1].result;
+ assert.deepEqual(c.chipValues(a.config),c.chipValues(b.config));assert.notDeepEqual(a.stacks,b.stacks);
+ const intermediate=c.chipValues(a.config).indexOf(c.blinds(a.config).big);assert.ok(intermediate>=0);
+ for(let i=0;i<a.stacks.length;i++){assert.ok(b.stacks[i][intermediate]>a.stacks[i][intermediate]);assert.ok(b.stacks[i][0]<=2);}
+});
