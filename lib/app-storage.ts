@@ -1,3 +1,4 @@
+import { retireUnusedMauriDuplicate } from "./roster-repair";
 type PreparedStatement = {
   bind: (...values: unknown[]) => PreparedStatement;
   run: <T = unknown>() => Promise<T>;
@@ -81,6 +82,7 @@ export async function ensureAppSchema() {
     )`),
   ]);
 
+  await db.prepare(retireUnusedMauriDuplicate).run();
   return db;
 }
 

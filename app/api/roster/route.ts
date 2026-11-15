@@ -1,3 +1,4 @@
+import { normalizePlayerName } from "../../../lib/player-statistics";
 import { requireAdmin } from "../../../lib/admin-auth";
 import { ensureAppSchema } from "../../../lib/app-storage";
 
@@ -31,8 +32,11 @@ export async function POST(request: Request) {
     const nickname = String(payload.nickname ?? "").trim();
     if (!name) return Response.json({ error: "El nombre es obligatorio" }, { status: 400 });
     const db = await ensureRoster();
+    const existing = await db.prepare("SELECT name FROM poker_roster WHERE active = 1").all<{name:string}>();
+    if(existing.results.some(p=>normalizePlayerName(p.name)===normalizePlayerName(name)))return Response.json({error:"Ese jugador ya está registrado. Seleccionalo de la lista para conservar su historial."},{status:409});
     const id = `${slug(name)}-${crypto.randomUUID().slice(0, 8)}`;
-    await db.prepare("INSERT INTO poker_roster (id, name, nickname, kind, active) VALUES (?, ?, ?, 'permanente', 1)").bind(id, name, nickname).run();
+    const inserted=await db.prepare("INSERT INTO poker_roster (id, name, nickname, kind, active) SELECT ?, ?, ?, 'permanente', 1 WHERE NOT EXISTS (SELECT 1 FROM poker_roster WHERE active=1 AND lower(trim(name))=lower(trim(?))) RETURNING id").bind(id, name, nickname,name).first();
+    if(!inserted)return Response.json({error:"Ese jugador ya está registrado. Seleccionalo de la lista."},{status:409});
     return Response.json({ player: { id, name, nickname, kind: "permanente", active: 1, avatarKey: "", avatarUrl: "" } });
   } catch (error) {
     if (error instanceof Response) return error;
