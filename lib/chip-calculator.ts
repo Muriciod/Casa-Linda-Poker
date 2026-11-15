@@ -243,15 +243,24 @@ export function recommend(c:Config){
  if(!count(c.inventory))throw Error('Completá el inventario del Maletín 2 antes de calcular.');
  const {small,big}=blinds(c);if(!Number.isSafeInteger(small)||!Number.isSafeInteger(big))throw Error('Las ciegas deben ser guaraníes enteros. Ajustá el buy-in o las ciegas.');
  const results:Result[]=[];let limited=false;
- for(const divisor of [1,2,5])for(const ratios of [[1,2,4,10,20],[1,2,5,10,25]]){
-  const chipValues=ratios.map(n=>n*small/divisor);if(!validValues(chipValues))continue;
+ // Familiar 1–2–5 decimal denominations, independent of blind multiples.
+ const ladder:number[]=[];
+ for(let unit=1;unit<=c.buyIn&&unit<=Number.MAX_SAFE_INTEGER/100;unit*=10)for(const n of [1,2,5])ladder.push(n*unit);
+ const candidates:number[][]=[];
+ for(let i=0;i<ladder.length-4;i++){
+  const low=ladder[i];if(low>small||low<small/10||[small,big,c.buyIn].some(n=>n%low!==0))continue;
+  for(const offsets of [[0,1,2,3,4],[0,1,2,4,5],[0,1,2,4,6]]){
+   const values=offsets.map(n=>ladder[i+n]);if(validValues(values)&&values[4]<=c.buyIn)candidates.push(values);
+  }
+ }
+ for(const chipValues of candidates){
   try{results.push(calculate({...c,chipValues,pointValue:1,mode:'balanced'}));}catch(e){if(/búsqueda/.test(String(e)))limited=true;}
  }
  if(!results.length)throw Error(limited?'No se completó la búsqueda. Probá valores manuales.':'No se encontró un reparto exacto con los valores automáticos evaluados. Revisá el inventario o definí valores manuales.');
  const tiny=(r:Result)=>r.stacks.reduce((s,row)=>s+row.reduce((n,q,i)=>n+(chipValues(r.config)[i]<big/2?q:0),0),0);
  results.sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||count(a.stacks.flat())-count(b.stacks.flat())||Number(b.reserve)-Number(a.reserve));
  const result=results[0];if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
- return [{label:'Recomendada',reason:'Valores calculados según buy-in, ciegas, jugadores e inventario. Prioriza apuestas cómodas y pocas fichas pequeñas.',result}];
+ return [{label:'Recomendada',reason:'Valores simples de la serie 1–2–5 (100, 200, 500, 1.000…). Se eligen según buy-in, ciegas e inventario, sin redondear el stack.',result}];
 }
 export const changeOptions=(bank:number[],denomination:number,c?:Config)=>engine(c).changeOptions(bank,denomination);
 export const applyChange=(bank:number[],change:Change,c?:Config)=>engine(c).applyChange(bank,change);

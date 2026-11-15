@@ -50,9 +50,11 @@ test('custom minimum allocation agrees with independent exhaustive oracle for no
 });
 
 test('automatic color values follow buy-in, both blinds modes and inventory while manual remains fixed',()=>{
- for(const buyIn of [20000,30000,100000,500000])for(const bb of [50,100])for(const players of [2,10]){
- const input=config({buyIn,bb,players,autoValues:true});const r=c.recommend(input)[0].result;exact(r);const b=c.blinds(input);for(const row of r.stacks){assert.ok(payable(row,r.config.chipValues,b.small));assert.ok(payable(row,r.config.chipValues,b.big));}assert.deepEqual(input.chipValues,c.COLOR_VALUES);
+ for(const buyIn of [20000,30000,40000,100000,500000])for(const bb of [50,100])for(const players of [2,10]){
+ const input=config({buyIn,bb,players,autoValues:true});let r;try{r=c.recommend(input)[0].result;}catch(e){throw Error(`${buyIn}/${bb}/${players}: ${e.message}`);}exact(r);assert.ok(r.config.chipValues.every(v=>{while(v%10===0)v/=10;return [1,2,5].includes(v);}));const b=c.blinds(input);for(const row of r.stacks){assert.ok(payable(row,r.config.chipValues,b.small));assert.ok(payable(row,r.config.chipValues,b.big));}assert.deepEqual(input.chipValues,c.COLOR_VALUES);
  }
  assert.notDeepEqual(c.recommend(config({buyIn:20000,autoValues:true}))[0].result.config.chipValues,c.COLOR_VALUES);
  assert.throws(()=>c.recommend(config({buyIn:20000,autoValues:false})),/compatibles/);
 });
+
+test('40k eight-player regression excludes 400/800/1600/4000/8000 chip values',()=>{const r=c.recommend(config({buyIn:40000,players:8,autoValues:true}))[0].result;exact(r);assert.ok(r.config.chipValues.every(v=>![400,800,1600,4000,8000].includes(v)));assert.equal(c.blinds(r.config).small,400);assert.equal(c.blinds(r.config).big,800);});
