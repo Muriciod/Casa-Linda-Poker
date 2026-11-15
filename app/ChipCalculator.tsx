@@ -13,11 +13,12 @@ const money=(n:number)=>`${number(n)} Gs.`;
 // Original numbered chips, left to right: white, red, green, black, purple, yellow.
 const chipPhotoCenters=[97,297,499,699,901,1102];
 // Source photo order is white, blue, green, red, black; UI remains white, red, green, blue, black.
-const colorPhotoCenters=[80,504,364,221,645];
+// Individual full-rim bounds; the photos have different centers and diameters.
+const colorPhotoBounds=['14 19 132 133','438 18 132 133','295 17 137 137','153 18 135 136','577 20 138 137'];
 function Chip({i,config=DEFAULT_CONFIG}: {i:number;config?:Config}) {
  const label=`Ficha ${chipName(config,i)}${config.caseId===2?'':` · ${number(DENOMS[i])} puntos`} · ${money(chipValues(config)[i])}`;
  if(config.caseId!==2)return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={`${chipPhotoCenters[i]-87} 30 174 174`} aria-hidden="true" focusable="false"><image href="/images/chips/case-one-original.png" width="1195" height="233"/></svg></span>;
- return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={`${colorPhotoCenters[i]-65} 20 130 132`} aria-hidden="true" focusable="false"><image href="/images/chips/case-two-original.png" width="725" height="160"/></svg></span>;
+ return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={colorPhotoBounds[i]} preserveAspectRatio="none" aria-hidden="true" focusable="false"><image href="/images/chips/case-two-original.png" width="725" height="160"/></svg></span>;
 }
 function StackCard({stack,config,title}:{stack:number[];config:Config;title:string}) {
   const n=count(stack);return <article className="chip-stack-card"><header><h3>{title}</h3><span className="chip-efficiency">{n<=14?'Reparto compacto':'Reparto ampliado'} · {n} fichas</span></header><div className="chip-stack-lines">{stack.map((qty,i)=>qty>0&&<div key={i}><Chip i={i} config={config}/><span><strong>{qty} × {chipLabel(config,i)}</strong><small>{chipName(config,i)} · {money(chipValues(config)[i])} cada una</small></span><b>{money(qty*chipValues(config)[i])}</b></div>)}</div><footer><strong>{money(monetaryValue(stack,config))}</strong><span>{config.caseId===2?'':number(value(stack))+' puntos · '}{number(config.buyIn/blinds(config).big)}bb</span></footer></article>;
