@@ -1,7 +1,7 @@
 export const ALLOWED_SCALES = [100, 1000];
 export const DENOMS = [1, 5, 25, 100, 500, 1000];
 export const INITIAL_INVENTORY = [100, 150, 100, 100, 25, 25];
-export type Config = { caseId?: 1 | 2; chipValues?: number[]; equivalence?: "auto" | "manual"; buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
+export type Config = { caseId?: 1 | 2; autoValues?: boolean; chipValues?: number[]; equivalence?: "auto" | "manual"; buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
 export const DEFAULT_CONFIG: Config = { buyIn: 500000, players: 6, bb: 50, automatic: true, small: 5000, big: 10000, pointValue: 1000, mode: 'balanced', inventory: [...INITIAL_INVENTORY] };
 export type Result = {config: Config; stacks: number[][]; bank: number[]; warnings: string[]; optimal: boolean; balanced: boolean; reserve: boolean; comfort: number};
 export type Change = { denomination: number; given: number[] };
@@ -237,7 +237,22 @@ export const blinds=base.blinds;
 export const validateConfig=(c:Config)=>engine(c).validateConfig(c);
 export const incompatibleBlinds=(c:Config)=>engine(c).incompatibleBlinds(c);
 export const calculate=(c:Config)=>engine(c).calculate(c);
-export const recommend=(c:Config)=>engine(c).recommend(c);
+export function recommend(c:Config){
+ if(c.caseId!==2||c.autoValues===false)return engine(c).recommend(c);
+ const issues=validateConfig(c);if(issues.length)throw Error(issues[0]);
+ if(!count(c.inventory))throw Error('Completá el inventario del Maletín 2 antes de calcular.');
+ const {small,big}=blinds(c);if(!Number.isSafeInteger(small)||!Number.isSafeInteger(big))throw Error('Las ciegas deben ser guaraníes enteros. Ajustá el buy-in o las ciegas.');
+ const results:Result[]=[];let limited=false;
+ for(const divisor of [1,2,5])for(const ratios of [[1,2,4,10,20],[1,2,5,10,25]]){
+  const chipValues=ratios.map(n=>n*small/divisor);if(!validValues(chipValues))continue;
+  try{results.push(calculate({...c,chipValues,pointValue:1,mode:'balanced'}));}catch(e){if(/búsqueda/.test(String(e)))limited=true;}
+ }
+ if(!results.length)throw Error(limited?'No se completó la búsqueda. Probá valores manuales.':'No se encontró un reparto exacto con los valores automáticos evaluados. Revisá el inventario o definí valores manuales.');
+ const tiny=(r:Result)=>r.stacks.reduce((s,row)=>s+row.reduce((n,q,i)=>n+(chipValues(r.config)[i]<big/2?q:0),0),0);
+ results.sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||count(a.stacks.flat())-count(b.stacks.flat())||Number(b.reserve)-Number(a.reserve));
+ const result=results[0];if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
+ return [{label:'Recomendada',reason:'Valores calculados según buy-in, ciegas, jugadores e inventario. Prioriza apuestas cómodas y pocas fichas pequeñas.',result}];
+}
 export const changeOptions=(bank:number[],denomination:number,c?:Config)=>engine(c).changeOptions(bank,denomination);
 export const applyChange=(bank:number[],change:Change,c?:Config)=>engine(c).applyChange(bank,change);
 export const sessionBank=(s:Session)=>engine(s?.config).sessionBank(s);

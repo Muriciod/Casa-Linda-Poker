@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import ts from 'typescript';
 const source=readFileSync(new URL('../lib/chip-calculator.ts',import.meta.url),'utf8');
 const c=await import('data:text/javascript;base64,'+Buffer.from(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64'));
-const config=(extra={})=>({...structuredClone(c.COLOR_CONFIG),inventory:[100,100,100,100,100],...extra});
+const config=(extra={})=>({...structuredClone(c.COLOR_CONFIG),autoValues:false,inventory:[100,100,100,100,100],...extra});
 function exact(r){assert.equal(r.stacks.length,r.config.players);for(const row of r.stacks)assert.equal(c.monetaryValue(row,r.config),r.config.buyIn);assert.deepEqual(r.bank.map((n,i)=>n+r.stacks.reduce((s,row)=>s+row[i],0)),r.config.inventory);assert.ok(r.bank.every(n=>n>=0));}
 function payable(row,values,target){if(target===0)return true;const i=values.length-1;if(i<0)return false;for(let n=0;n<=row[i]&&n*values[i]<=target;n++)if(payable(row.slice(0,i),values.slice(0,i),target-n*values[i]))return true;return false;}
 test('color case starts empty, correct values, strict positive ascending custom values',()=>{
@@ -47,4 +47,12 @@ test('custom minimum allocation agrees with independent exhaustive oracle for no
  const input=config({chipValues:vals,inventory:stock,buyIn:target,players:2,automatic:false,small:300,big:600,mode:'minimum'});
  if(best===Infinity)assert.throws(()=>c.calculate(input));else {const r=c.calculate(input);exact(r);assert.equal(c.count(r.stacks.flat()),best);}
  }
+});
+
+test('automatic color values follow buy-in, both blinds modes and inventory while manual remains fixed',()=>{
+ for(const buyIn of [20000,30000,100000,500000])for(const bb of [50,100])for(const players of [2,10]){
+ const input=config({buyIn,bb,players,autoValues:true});const r=c.recommend(input)[0].result;exact(r);const b=c.blinds(input);for(const row of r.stacks){assert.ok(payable(row,r.config.chipValues,b.small));assert.ok(payable(row,r.config.chipValues,b.big));}assert.deepEqual(input.chipValues,c.COLOR_VALUES);
+ }
+ assert.notDeepEqual(c.recommend(config({buyIn:20000,autoValues:true}))[0].result.config.chipValues,c.COLOR_VALUES);
+ assert.throws(()=>c.recommend(config({buyIn:20000,autoValues:false})),/compatibles/);
 });
