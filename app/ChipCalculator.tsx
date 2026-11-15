@@ -1,10 +1,9 @@
 "use client";
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DENOMS, COLOR_CONFIG, COLOR_VALUES, chipValues, monetaryValue, DEFAULT_CONFIG, type Config, type Result, type SavedState, type Change, count, value, subtract, blinds, changeOptions, sessionBank, applyChange, validateConfig } from '../lib/chip-calculator';
 import './chip-calculator.css';
 const names=['Blanca','Roja','Verde','Negra','Morada','Amarilla'];
 const colorNames=['Blanca','Roja','Verde','Azul','Negra'];
-const colorColors=['#eae6e0','#ae253a','#218369','#306ec9','#25252b'];
 const chipName=(c:Config,i:number)=>c.caseId===2?colorNames[i]:names[i];
 const chipLabel=(c:Config,i:number)=>c.caseId===2?colorNames[i]:number(DENOMS[i])+' pts';
 const caseLabel=(c:Config)=>c.caseId===2?'Maletín 2 · Fichas por colores':'Maletín 1 · Fichas numeradas';
@@ -13,10 +12,12 @@ const number=(n:number)=>n.toLocaleString('es-PY',{maximumFractionDigits:6});
 const money=(n:number)=>`${number(n)} Gs.`;
 // Original numbered chips, left to right: white, red, green, black, purple, yellow.
 const chipPhotoCenters=[97,297,499,699,901,1102];
+// Source photo order is white, blue, green, red, black; UI remains white, red, green, blue, black.
+const colorPhotoCenters=[80,504,364,221,645];
 function Chip({i,config=DEFAULT_CONFIG}: {i:number;config?:Config}) {
  const label=`Ficha ${chipName(config,i)}${config.caseId===2?'':` · ${number(DENOMS[i])} puntos`} · ${money(chipValues(config)[i])}`;
  if(config.caseId!==2)return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={`${chipPhotoCenters[i]-87} 30 174 174`} aria-hidden="true" focusable="false"><image href="/images/chips/case-one-original.png" width="1195" height="233"/></svg></span>;
- return <span className={`physical-chip chip-${i}`} style={{'--chip-color':colorColors[i]} as CSSProperties} role="img" aria-label={label}><b/></span>;
+ return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={`${colorPhotoCenters[i]-65} 20 130 132`} aria-hidden="true" focusable="false"><image href="/images/chips/case-two-original.png" width="725" height="160"/></svg></span>;
 }
 function StackCard({stack,config,title}:{stack:number[];config:Config;title:string}) {
   const n=count(stack);return <article className="chip-stack-card"><header><h3>{title}</h3><span className="chip-efficiency">{n<=14?'Reparto compacto':'Reparto ampliado'} · {n} fichas</span></header><div className="chip-stack-lines">{stack.map((qty,i)=>qty>0&&<div key={i}><Chip i={i} config={config}/><span><strong>{qty} × {chipLabel(config,i)}</strong><small>{chipName(config,i)} · {money(chipValues(config)[i])} cada una</small></span><b>{money(qty*chipValues(config)[i])}</b></div>)}</div><footer><strong>{money(monetaryValue(stack,config))}</strong><span>{config.caseId===2?'':number(value(stack))+' puntos · '}{number(config.buyIn/blinds(config).big)}bb</span></footer></article>;
