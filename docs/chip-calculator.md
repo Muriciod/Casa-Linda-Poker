@@ -5,10 +5,9 @@ Herramienta independiente en Inicio y navegación «Fichas». No importa módulo
 ## Optimización y exactitud
 
 - Guaraníes y cantidades enteros seguros; valores incompatibles se rechazan sin redondear. Las ciegas manuales muestran el stack efectivo, aunque difiera de 50/100bb.
-- Enumeración acotada de combinaciones exactas y búsqueda conjunta con poda, simetría y memoización. Minimiza fichas totales dentro de cada fase; prefiere igualdad si empata. No usa greedy para asignar stacks.
-- Mínimo: busca primero stacks de hasta 14, luego alternativa sin ese límite.
-- Equilibrado: primero stacks de hasta 14 que permitan pagar SB y BB por separado y reservando otra pareja de ciegas en el banco; relaja reserva, luego jugabilidad, antes de superar 14. Cada relajación relevante se indica. Esto prioriza el límite pedido sobre jugabilidad cuando no es posible cumplir ambos.
-- El banco conserva al menos esa reserva cuando la primera fase es viable; no garantiza cambio ilimitado durante toda la noche.
+- Enumeración de repartos exactos y búsqueda conjunta con poda, simetría y memoización. Respeta el stock de toda la mesa y prefiere stacks iguales cuando empatan.
+- Recomendada y Más cambio priorizan que cada jugador pueda pagar SB y BB con fichas distintas. Dentro del mismo nivel, favorecen fichas para apuestas, denominaciones intermedias para cambio y una parte importante del capital en fichas grandes.
+- La cantidad total de fichas es un criterio secundario. No hay un límite fijo por jugador. El banco conserva el inventario que no se repartió y se indica si tiene cambio para las ciegas.
 - La búsqueda corre en un Web Worker. Límite de 2 millones de pasos y hasta 1.000 fichas por denominación. Si termina sin certificar óptimo, lo indica explícitamente; nunca confunde tiempo agotado con imposibilidad matemática. Puede pedir ajustar datos en inventarios complejos.
 
 ## Persistencia y movimientos
@@ -27,7 +26,7 @@ Prueba visual local: worker en navegador, copiar reparto, confirmar, registrar c
 
 ## Escalas permitidas
 
-Los nuevos cálculos y preferencias solo admiten ×100 o ×1.000. Automático evalúa ambas con los dos modos de reparto; manual selecciona una escala cerrada. Ciegas incompatibles generan una sugerencia explícita con las bb reales, nunca un redondeo aplicado. Las ciegas manuales pueden diferir de 50/100bb, con advertencia visible.
+Los nuevos cálculos y preferencias solo admiten ×100 o ×1.000. Automático compara ambas por jugabilidad; manual conserva la escala elegida. Ciegas incompatibles generan una sugerencia explícita con las bb reales, nunca un redondeo aplicado. Las ciegas manuales pueden diferir de 50/100bb, con advertencia visible.
 
 Los bancos confirmados con una escala anterior se conservan y se identifican como tales. El servidor permite continuar sus movimientos, pero no crear ni alterar un reparto con una escala retirada. El límite de búsqueda cuenta también cada candidato de la asignación conjunta para evitar bloqueos en inventarios complejos.
 
@@ -35,7 +34,7 @@ Los bancos confirmados con una escala anterior se conservan y se identifican com
 
 El modo equilibrado cubre una SB y una BB con fichas distintas. Busca además dos fichas intermedias, o una si el inventario no permite dos, reservadas aparte de las ciegas. Selecciona una denominación entre media BB y cuatro BB: prefiere múltiplos exactos y después la más cercana. Esta cantidad acotada evita llenar el stack con intermedias. Una roja de 500 Gs. nunca se considera un pago exacto de BB 400 Gs.
 
-Dentro de cada nivel minimiza primero las fichas de valor menor que media BB y después el total físico. La búsqueda conjunta usa el inventario como límite, sin techo artificial de 14, 20 o 30; prefiere repartos iguales en empates. Conserva el banco restante. Si llega al presupuesto computacional, devuelve solo una solución comprobada y avisa que no certifica el óptimo. La alternativa Menos fichas mantiene su búsqueda de cantidad mínima y puede requerir cambio.
+Dentro de cada nivel, el motor puntúa combinaciones de apuestas (2 y 3 BB), fichas cercanas a la BB, una denominación intermedia para cambios y fichas grandes para representar el capital. Penaliza acumular fichas mínimas y concentrar demasiado valor en una sola denominación. Las metas de cantidad dependen del stack y de los valores disponibles; Más cambio aumenta el peso de las fichas para apostar sin bajar el nivel de ciegas.
 
 Las escalas siguen siendo ×100/×1.000. 50.000 Gs. a 100bb implica SB 250 Gs., incompatible con ambas: se informa sin redondear.
 

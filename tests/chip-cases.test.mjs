@@ -77,3 +77,29 @@ test('more change increases useful intermediate chips without changing the scale
  const intermediate=c.chipValues(a.config).indexOf(c.blinds(a.config).big);assert.ok(intermediate>=0);
  for(let i=0;i<a.stacks.length;i++){assert.ok(b.stacks[i][intermediate]>a.stacks[i][intermediate]);assert.ok(b.stacks[i][0]<=2);}
 });
+
+test('casino-style stacks cover exact opening bets and spread change and capital across denominations',()=>{
+ const examples=[
+  {buyIn:500000,small:5000,big:10000,chipValues:[5000,10000,20000,50000,100000]},
+  {buyIn:1000000,small:5000,big:10000,chipValues:[5000,10000,50000,100000,500000]},
+  {buyIn:500000,small:10000,big:20000,chipValues:[5000,10000,20000,50000,100000]},
+ ];
+ for(const input of examples){
+  const cfg=config({...input,automatic:false,players:6,inventory:[80,80,80,80,80]});
+  const options=c.recommend(cfg);assert.deepEqual(options.map(x=>x.label),['Recomendada','Más cambio']);
+  const bbIndex=input.chipValues.indexOf(input.big),changeIndex=input.chipValues.indexOf(50000);
+  for(const {result} of options){
+   exact(result);assert.deepEqual(result.config.chipValues,input.chipValues);assert.ok(result.reserve);
+   for(const row of result.stacks){
+    assert.ok(row[bbIndex]>=3);assert.ok(row[changeIndex]>=2);
+    const afterSmall=[...row];const sbIndex=input.chipValues.indexOf(input.small);assert.ok(afterSmall[sbIndex]>0);afterSmall[sbIndex]--;
+    assert.ok(afterSmall[bbIndex]>=3);
+    assert.ok(payable(row,input.chipValues,3*input.big));
+    const capital=row.reduce((sum,n,i)=>sum+(input.chipValues[i]>=100000?n*input.chipValues[i]:0),0);
+    assert.ok(capital>=input.buyIn*.4);assert.ok(c.count(row)<=20);
+   }
+  }
+  if(input.buyIn===1000000)assert.ok(options[0].result.stacks.every(row=>row[4]===1));
+  assert.ok(options[1].result.stacks.reduce((n,row)=>n+row[bbIndex],0)>=options[0].result.stacks.reduce((n,row)=>n+row[bbIndex],0));
+ }
+});

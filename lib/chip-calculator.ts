@@ -101,6 +101,39 @@ function bettingReady(row:number[],small:number,big:number,level:number):boolean
   if(qty){if(i<0||remaining[i]<qty)return false;remaining[i]-=qty;}
   return canFundPayments(remaining,openingPayments(small,big,level));
 }
+// Soft targets, scaled to the blinds and the actual stack. Opening SB + BB
+// remains a separate, higher priority: these costs only compare feasible rows.
+function stackCost(target:number,big:number,stock:number[],moreChange:boolean){
+  const betting=bettingDenomination(big);
+  const top=DENOMS.reduce((last,d,i)=>d<=target&&stock[i]>0?i:last,-1);
+  const bridge=DENOMS.map((d,i)=>({d,i})).filter(({d,i})=>i!==betting&&i!==top&&d>big*2&&d<=big*8&&stock[i]>0&&d<=target*.3)
+    .sort((a,b)=>Math.abs(a.d-big*5)-Math.abs(b.d-big*5))[0];
+  const bettingGoal=betting<0?0:Math.min(moreChange?8:5,Math.floor(target*.22/DENOMS[betting]));
+  const bridgeGoal=bridge?Math.min(3,Math.floor(target*.3/bridge.d)):0;
+  const isCapital=(d:number,i:number)=>d>big*8||(i===top&&d>big*3&&!!bridge);
+  const hasCapital=DENOMS.some((d,i)=>isCapital(d,i)&&d<=target&&stock[i]>0);
+  return (row:number[])=>{
+    let tiny=0, capital=0, largestPile=0;
+    for(let i=0;i<DENOMS.length;i++){
+      const d=DENOMS[i],pile=row[i]*d;
+      if(d<big/2)tiny+=row[i];
+      if(isCapital(d,i))capital+=pile;
+      largestPile=Math.max(largestPile,pile);
+    }
+    let missedRaises=0;
+    for(const amount of [2*big,3*big])if(amount<=target&&!canPay(amount,row))missedRaises++;
+    const missingBetting=betting<0?0:Math.max(0,bettingGoal-row[betting]);
+    const missingBridge=bridge?Math.max(0,bridgeGoal-row[bridge.i]):0;
+    const capitalShortfall=hasCapital?Math.ceil(Math.max(0,target*.5-capital)/Math.max(3*big,target/15)):0;
+    const concentration=Math.ceil(Math.max(0,largestPile-target*.75)/Math.max(5*big,target/12));
+    return count(row)+2*tiny+(moreChange?6:4)*missingBetting+5*missingBridge+3*missedRaises+2*capitalShortfall+3*concentration;
+  };
+}
+function tableCost(r:Result,moreChange=false){
+  const {big}=blinds(r.config),scale=factor(r.config);
+  const cost=stackCost(r.config.buyIn/scale,big/scale,r.config.inventory,moreChange);
+  return r.stacks.reduce((s,row)=>s+cost(row),0);
+}
 // Bounded dynamic programming seed; binary bundles keep the cost proportional to
 // target × log(inventory). Immutable links reconstruct exact physical quantities.
 function minimumStack(target:number,stock:number[]):number[]|null{
@@ -132,24 +165,23 @@ function calculate(c: Config, moreChange=false): Result {
   if(!canPay(sb,c.inventory)||!canPay(bb,c.inventory))throw Error(c.caseId===2?incompatibleBlinds(c):'El inventario no permite pagar exactamente las ciegas. Agregá denominaciones pequeñas o ajustá las ciegas.');
   if(value(c.inventory)<target*c.players)throw Error('Inventario insuficiente para cubrir el buy-in de todos los jugadores.');
   const intermediate=bettingDenomination(bb);
-  const weight=count(c.inventory)+1;
-  const rowCost=(row:number[])=>c.mode==='minimum'?count(row):(moreChange&&intermediate>=0?Math.max(0,6-row[intermediate])*weight*weight:0)+row.reduce((n,q,i)=>n+(DENOMS[i]<bb/2?q:0),0)*weight+count(row);
+  const rowCost=c.mode==='minimum'?count:stackCost(target,bb,c.inventory,moreChange);
   let steps=0, interrupted=false;
   const tick=()=>{if(++steps>2000000){interrupted=true;throw Error('La búsqueda alcanzó su límite. Ajustá el buy-in o el inventario para poder verificar el reparto.');}};
   function solve(pool: number[], cap: number, comfort: number): {stacks:number[][]; optimal:boolean}|null {
-    let choices: number[][];
-    try{choices=patterns(target,pool,cap,tick).filter(row=>bettingReady(row,sb,bb,comfort)).sort((a,b)=>rowCost(a)-rowCost(b)||rank(a,b));}catch(e){if(interrupted)throw Error('La búsqueda es demasiado amplia para verificar un reparto. Reducí las cantidades del inventario o ajustá el buy-in.');throw e;}
+    let choices: {row:number[];cost:number}[];
+    try{choices=patterns(target,pool,cap,tick).filter(row=>bettingReady(row,sb,bb,comfort)).map(row=>({row,cost:rowCost(row)})).sort((a,b)=>a.cost-b.cost||rank(a.row,b.row));}catch(e){if(interrupted)throw Error('La búsqueda es demasiado amplia para verificar un reparto. Reducí las cantidades del inventario o ajustá el buy-in.');throw e;}
     if(!choices.length)return null;
     let best:number[][]|null=null, cost=Infinity;
     // An equal allocation is the preferred tie-breaker and a useful proven upper bound.
-    for(const row of choices)if(row.every((x,i)=>x*c.players<=pool[i])){best=Array.from({length:c.players},()=>[...row]);cost=rowCost(row)*c.players;break;}
-    if(cost===rowCost(choices[0])*c.players)return {stacks:best!,optimal:true};
+    for(const choice of choices)if(choice.row.every((x,i)=>x*c.players<=pool[i])){best=Array.from({length:c.players},()=>[...choice.row]);cost=choice.cost*c.players;break;}
+    if(cost===choices[0].cost*c.players)return {stacks:best!,optimal:true};
     const seen=new Map<string,number>();
     function pack(left:number,stock:number[],start:number,total:number,rows:number[][]){
       tick();if(!left){if(total<cost){best=rows.map(r=>[...r]);cost=total;}return;}
       if(value(stock)<left*target)return;
       const key=left+':'+start+':'+stock.join(',');if((seen.get(key)??Infinity)<=total)return;seen.set(key,total);
-      for(let k=start;k<choices.length;k++){tick();const row=choices[k], next=total+rowCost(row);if(total+rowCost(row)*left>=cost)break;if(row.some((n,i)=>n>stock[i]))continue;pack(left-1,subtract(stock,row),k,next,[...rows,row]);}
+      for(let k=start;k<choices.length;k++){tick();const {row,cost:price}=choices[k], next=total+price;if(total+price*left>=cost)break;if(row.some((n,i)=>n>stock[i]))continue;pack(left-1,subtract(stock,row),k,next,[...rows,row]);}
     }
     try{pack(c.players,pool,0,0,[]);}catch(e){if(!interrupted)throw e;if(!best)throw Error('No se pudo completar la búsqueda con este inventario. Ajustá el buy-in o las cantidades; no se confirmó que el reparto sea imposible.');}
     return best ? {stacks:best,optimal:!interrupted}:null;
@@ -166,8 +198,7 @@ function calculate(c: Config, moreChange=false): Result {
     const seed=seeded?.every(row=>bettingReady(row,sb,bb,comfort))?seeded:null;
     let selected:{stacks:number[][];optimal:boolean}|null=null;
     let keptReserve=false;
-    // Balanced search considers the physical inventory bound and minimizes tiny chips
-    // before total count. Minimum mode deepens only until its first exact solution.
+    // Balanced search compares playable stacks up to the physical inventory bound. Minimum mode deepens only until its first exact solution.
     for(let cap=c.mode==='minimum'?Math.min(14,maxPerPlayer):maxPerPlayer;cap<=maxPerPlayer;cap++){
       try{selected=solve(c.inventory,cap,comfort);}catch(e){if(!interrupted||!seed)throw e;selected={stacks:seed,optimal:false};}
 
@@ -182,9 +213,9 @@ function calculate(c: Config, moreChange=false): Result {
     const bank=solved.stacks.reduce((stock,row)=>subtract(stock,row),[...c.inventory]);
     const warnings:string[]=[];
     if(!c.automatic && c.buyIn!==big*c.bb)warnings.push(`Las ciegas manuales dan un stack de ${(c.buyIn/big).toLocaleString('es-PY',{maximumFractionDigits:4})}bb, distinto de ${c.bb}bb.`);
-    if(c.mode==='balanced'&&comfort===0)warnings.push('El inventario no permite entregar a todos fichas para pagar SB y BB sin cambio. Usá el banco durante la partida.');
+    if(c.mode==='balanced'&&comfort===0)warnings.push('El inventario no permite entregar a todos fichas para pagar SB y BB sin cambio. Revisá el stock de fichas chicas o ajustá las ciegas antes de jugar.');
     if(!canPay(sb,bank)||!canPay(bb,bank))warnings.push('El banco no conserva cambio suficiente para las ciegas. Revisá el reparto antes de confirmarlo.');
-    if(!solved.optimal)warnings.push('Reparto exacto y válido; se alcanzó el límite de búsqueda y no se pudo certificar el mínimo global.');
+    if(!solved.optimal)warnings.push('Reparto exacto y válido; se alcanzó el límite de búsqueda antes de comparar todas las combinaciones.');
     return {config:structuredClone(c),stacks:solved.stacks,bank,warnings,optimal:solved.optimal,balanced:comfort>0,reserve:keptReserve,comfort};
   }
   throw Error('No existe un reparto exacto para todos los jugadores con el inventario disponible.');
@@ -222,12 +253,11 @@ function recommend(input:Config & {equivalence?:'auto'|'manual'}): {label:string
   const total=(r:Result)=>r.stacks.reduce((s,row)=>s+count(row),0);
   const liquidity=(r:Result)=>r.bank.reduce((s,n,i)=>s+(DENOMS[i]*r.config.pointValue<=b.big?n:0),0);
   const equal=(r:Result)=>r.stacks.every(row=>row.join()===r.stacks[0].join())?0:1;
-  const tiny=(r:Result)=>r.stacks.reduce((sum,row)=>sum+row.reduce((n,q,i)=>n+(DENOMS[i]*r.config.pointValue<b.big/2?q:0),0),0);
-  const recommended=[...results].sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||total(a)-total(b)||Number(b.reserve)-Number(a.reserve)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
+  const recommended=[...results].sort((a,b)=>b.comfort-a.comfort||tableCost(a)-tableCost(b)||Number(b.reserve)-Number(a.reserve)||total(a)-total(b)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
   if(incomplete)recommended.warnings.push('Algunas búsquedas alcanzaron su límite; se comparan las soluciones verificadas.');
   return practicalAlternatives(recommended);
 }
-return {validCounts,validateConfig,blinds,incompatibleBlinds,canPay,canFundPayments,bettingDenomination,openingPayments,bettingReady,calculate,changeOptions,applyChange,sessionBank,validateState,recommend,count,value,subtract,add};
+return {validCounts,validateConfig,blinds,incompatibleBlinds,canPay,canFundPayments,bettingDenomination,openingPayments,bettingReady,calculate,changeOptions,applyChange,sessionBank,validateState,recommend,tableCost,count,value,subtract,add};
 }
 const base=createEngine(DENOMS);
 function engine(c?:Config){if(c?.caseId!==2)return base;const values=validValues(c.chipValues)?c.chipValues:COLOR_VALUES;const unit=values.reduce(gcd);return createEngine(values.map(v=>v/unit),unit);}
@@ -257,20 +287,21 @@ export function recommend(c:Config){
   try{results.push(calculate({...c,chipValues,pointValue:1,mode:'balanced'}));}catch(e){if(/búsqueda/.test(String(e)))limited=true;}
  }
  if(!results.length)throw Error(limited?'No se completó la búsqueda. Probá valores manuales.':'No se encontró un reparto exacto con los valores automáticos evaluados. Revisá el inventario o definí valores manuales.');
- const tiny=(r:Result)=>r.stacks.reduce((s,row)=>s+row.reduce((n,q,i)=>n+(chipValues(r.config)[i]<big/2?q:0),0),0);
- results.sort((a,b)=>b.comfort-a.comfort||tiny(a)-tiny(b)||count(a.stacks.flat())-count(b.stacks.flat())||Number(b.reserve)-Number(a.reserve));
- const result=results[0];if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
+ const scored=results.map(result=>({result,cost:engine(result.config).tableCost(result)}));
+ scored.sort((a,b)=>b.result.comfort-a.result.comfort||a.cost-b.cost||Number(b.result.reserve)-Number(a.result.reserve)||count(a.result.stacks.flat())-count(b.result.stacks.flat()));
+ const result=scored[0].result;if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
  return practicalAlternatives(result);
 }
 // Both choices keep blind feasibility ahead of chip count. Legacy minimum configs
 // remain readable for confirmed banks, but are never offered for new recommendations.
 function practicalAlternatives(result:Result){
- let change:Result;
- try{change=engine(result.config).calculate({...result.config,mode:'balanced'},true);}catch{change=structuredClone(result);}
- const same=JSON.stringify(change.stacks)===JSON.stringify(result.stacks);
+ let change=result;
+ const solver=engine(result.config);
+ try{const candidate=solver.calculate(result.config,true);if(candidate.comfort>=result.comfort&&solver.tableCost(candidate,true)<solver.tableCost(result,true))change=candidate;}catch{/* Keep the verified recommendation. */}
+ const same=change===result;
  return [
-  {label:'Recomendada',reason:'Prioriza ciegas, apuestas habituales y pocas fichas pequeñas; reduce el total sin sacrificar comodidad.',result},
-  {label:'Más cambio',reason:same?'El reparto recomendado ya es la mejor opción de cambio encontrada con estas existencias.':'Incluye más fichas intermedias para apostar y dar cambio, evitando acumular fichas mínimas.',result:change}
+  {label:'Recomendada',reason:'Combina fichas para ciegas y apuestas con denominaciones intermedias para cambio y fichas grandes para el capital.',result},
+  {label:'Más cambio',reason:same?'El reparto recomendado ya es la mejor opción de cambio encontrada con estas existencias.':'Da más peso a las fichas útiles para apostar y dar cambio, manteniendo las ciegas y el buy-in.',result:same?structuredClone(result):change}
  ];
 }
 export const changeOptions=(bank:number[],denomination:number,c?:Config)=>engine(c).changeOptions(bank,denomination);
