@@ -1,0 +1,19 @@
+/* Isolated from the old felt/seat rules: one geometry model owns all sizing. */
+.cl-table { min-width: 0; border: 1px solid var(--border); border-radius: var(--card-radius, 18px); background: var(--card-fill, #17151a); overflow: hidden; }
+.cl-table-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:20px 18px 16px; }
+.cl-table-heading div > span { display:block; margin-bottom:5px; color:#c69da4; font-size:10px; font-weight:700; letter-spacing:.16em; }
+.cl-table-heading h3 { margin:0; font:500 23px/1.2 Georgia,serif; color:#f6f2f5; }
+.cl-table-heading > small { flex:none; padding:6px 9px; border:1px solid #ffffff15; border-radius:99px; color:#c7becb; font-size:11px; }
+.cl-table-viewport { margin:0 10px 10px; min-width:0; border-radius:12px; background:radial-gradient(ellipse at center,#262028 0%,#100f13 75%); }
+.cl-table-scene { position:relative; width:100%; isolation:isolate; }
+.cl-table-playmat { position:absolute; display:block; max-width:none; overflow:visible; filter:drop-shadow(0 8px 10px #0008); }
+.cl-table-seats { list-style:none; margin:0; padding:0; }
+.cl-table-seat { position:absolute; box-sizing:border-box; z-index:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; padding:5px 6px; border:1px solid #56444c; border-radius:12px; color:#f5f0f4; background:linear-gradient(145deg,#30262d,#1d1a21); box-shadow:0 5px 12px #0004; text-align:center; }
+.cl-table-seat-identity { position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:28px; flex:none; }
+.cl-table-avatar,.cl-table-avatar .avatar { display:flex; align-items:center; justify-content:center; width:28px; height:28px; min-width:28px; border-radius:50%; overflow:hidden; font-size:12px; }
+.cl-table-avatar img { display:block; width:100%; height:100%; object-fit:cover; }
+.cl-table-seat-number { position:absolute; right:0; top:0; color:#b59eaa; font-size:8px; letter-spacing:.04em; }
+.cl-table-player-name { display:block; width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:650; line-height:16px; }
+.cl-table-player-amount { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:16px; font-variant-numeric:tabular-nums; color:#e3ced6; }
+.cl-table-caption { margin:0; padding:8px 18px 18px; text-align:center; color:var(--muted); font-size:12px; }
+@media(max-width:380px){.cl-table-heading{padding:16px 12px 12px}.cl-table-heading h3{font-size:20px}.cl-table-viewport{margin:0 6px 6px}.cl-table-player-name,.cl-table-player-amount{font-size:11px}}

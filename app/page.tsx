@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import PokerTable from "./PokerTable";
 import PlayerStatistics from "./PlayerStatistics";
 import AdminNotes from "./AdminNotes";
 import ChipCalculator from "./ChipCalculator";
@@ -736,28 +737,13 @@ function Modal({ title, subtitle, close, children }: { title: string; subtitle: 
 }
 
 function MiniPokerTable({ game, avatarUrlForPlayer }: { game: Game; avatarUrlForPlayer: (player: Player) => string | undefined }) {
-  const visiblePlayers = game.players.slice(0, 10);
-  const seatCount = Math.max(visiblePlayers.length, 1);
-  return <section className="poker-table-module" aria-label="Representación de la mesa actual">
-    <div className="panel-title table-module-title"><div><span className="section-kicker">MESA ACTUAL</span><h3>Mesa Casa Linda</h3></div><span className="table-suits" aria-hidden="true">♠ <i>♥</i> ♦ ♣</span></div>
-    <div className="poker-table-stage">
-      <div className="felt-table">
-        <img className="playmat-art" src="/playmat-casa-linda.svg" alt="" aria-hidden="true" />
-      </div>
-      {visiblePlayers.map((player, index) => {
-        const angle = -Math.PI / 2 + (index * Math.PI * 2) / seatCount;
-        const sideCount = Math.ceil(seatCount / 2);
-        const sideIndex = index < sideCount ? index : index - sideCount;
-        const sideTotal = index < sideCount ? sideCount : seatCount - sideCount;
-        const style = { "--seat-mobile-x": index < sideCount ? "16%" : "84%", "--seat-mobile-y": `${sideTotal <= 1 ? 50 : 13 + sideIndex * 74 / (sideTotal - 1)}%`, "--seat-x": `${50 + Math.cos(angle) * 38}%`, "--seat-y": `${50 + Math.sin(angle) * 35}%` } as CSSProperties;
-        return <div className="table-seat" style={style} key={player.id} title={`${player.nickname || player.name}: ${money(invested(player))}`}>
-          <ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} />
-          <span><strong>{player.nickname || player.name}</strong><small>{buyInLabel(invested(player))}</small></span>
-        </div>;
-      })}
-      {game.players.length > visiblePlayers.length && <span className="extra-seats">+{game.players.length - visiblePlayers.length}</span>}
-    </div>
-  </section>;
+  return <PokerTable players={game.players.map(player=>({
+    id:player.id,
+    name:player.nickname || player.name,
+    amountLabel:buyInLabel(invested(player)),
+    amountTitle:money(invested(player)),
+    avatar:<ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} />
+  }))} />;
 }
 
 function SummaryView({ game, canEdit, onChangeMode, avatarUrlForPlayer, onShare, onDownload, onPrint, onTransfers, onReopen, onOpenProfile }: { game: Game; canEdit: boolean; onChangeMode?: () => void; avatarUrlForPlayer: (player: Player) => string | undefined; onShare: () => void; onDownload: () => void; onPrint: () => void; onTransfers?: () => void; onReopen: () => void; onOpenProfile?: (player: Player) => void }) {

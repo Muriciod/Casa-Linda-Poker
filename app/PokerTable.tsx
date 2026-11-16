@@ -1,0 +1,44 @@
+"use client";
+
+import {useEffect, useId, useRef, useState, type ReactNode} from "react";
+import {pokerTableLayout, PLAYMAT_SIZE} from "../lib/poker-table-layout";
+import "./poker-table.css";
+
+export type TablePlayer = {id:string; name:string; amountLabel:string; amountTitle:string; avatar:ReactNode};
+
+export default function PokerTable({players}:{players:TablePlayer[]}) {
+  const ref=useRef<HTMLDivElement>(null);
+  const [width,setWidth]=useState(320);
+  const clip=useId().replace(/:/g,"");
+  useEffect(()=>{
+    const element=ref.current;if(!element)return;
+    const measure=()=>setWidth(element.getBoundingClientRect().width);
+    measure();const observer=new ResizeObserver(measure);observer.observe(element);
+    return ()=>observer.disconnect();
+  },[]);
+  const visible=players.slice(0,10), layout=pokerTableLayout(width,visible.length);
+  const {mat,portrait}=layout;
+  return <section className="cl-table" aria-label="Representación de la mesa actual">
+    <header className="cl-table-heading"><div><span>MESA ACTUAL</span><h3>Mesa Casa Linda</h3></div><small>{players.length} {players.length===1?'jugador':'jugadores'}</small></header>
+    <div ref={ref} className="cl-table-viewport">
+      <div className="cl-table-scene" style={{height:layout.height}} data-orientation={portrait?'portrait':'landscape'}>
+        <svg className="cl-table-playmat" role="img" aria-label="Playmat oficial de Casa Linda Poker, rojo, negro y blanco" viewBox={portrait?'0 0 679 1055':'0 0 1055 679'} preserveAspectRatio="xMidYMid meet" style={{left:mat.x,top:mat.y,width:mat.width,height:mat.height}}>
+          <defs><clipPath id={clip}><path d="M142 0H511Q568 0 574 51L678 974Q685 1055 618 1055H61Q-5 1055 1 974L85 54Q90 1 142 0Z"/></clipPath></defs>
+          <g transform={portrait?undefined:'translate(1055 0) rotate(90)'}>
+            {/* Original pixels. The clip only removes the white background outside the mat. */}
+            <image href="/images/table/playmat-official.png" width={PLAYMAT_SIZE.width} height={PLAYMAT_SIZE.height} clipPath={`url(#${clip})`} />
+          </g>
+        </svg>
+        <ol className="cl-table-seats" aria-label="Jugadores sentados">
+          {visible.map((player,i)=>{const seat=layout.seats[i];return <li className="cl-table-seat" key={player.id} style={{left:seat.x,top:seat.y,width:seat.width,height:seat.height}} title={`${player.name}: ${player.amountTitle}`}>
+            <div className="cl-table-seat-identity"><span className="cl-table-avatar">{player.avatar}</span><span className="cl-table-seat-number" aria-hidden="true">{String(i+1).padStart(2,'0')}</span></div>
+            <strong className="cl-table-player-name">{player.name}</strong>
+            <span className="cl-table-player-amount" aria-label={player.amountTitle}>{player.amountLabel}</span>
+          </li>;})}
+        </ol>
+      </div>
+    </div>
+    {players.length===0&&<p className="cl-table-caption">La mesa está lista. Añadí jugadores para comenzar.</p>}
+    {players.length>10&&<p className="cl-table-caption">+{players.length-10} jugadores en la lista de la partida.</p>}
+  </section>;
+}
