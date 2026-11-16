@@ -6,6 +6,7 @@ import PokerTable from "./PokerTable";
 import PlayerStatistics from "./PlayerStatistics";
 import AdminNotes from "./AdminNotes";
 import ChipCalculator from "./ChipCalculator";
+import SidePotCalculator from "./SidePotCalculator";
 import Transfers from "./PaymentTools";
 import ParticipantEditor from "./ParticipantEditor";
 import { editParticipant } from "../lib/player-edit";
@@ -18,7 +19,7 @@ type MovementType = "buyin" | "rebuy";
 type GameMode = "chips" | "cash" | "temporary";
 const modeLabels = { chips: "Fichas", cash: "CASHGAME · real", temporary: "Temporal · sin historial" };
 type GameStatus = "active" | "finalized";
-type View = "calculator" | "home" | "live" | "cashout" | "history" | "stats" | "summary";
+type View = "sidepots" | "calculator" | "home" | "live" | "cashout" | "history" | "stats" | "summary";
 type AccessMode = "entry" | "viewer" | "admin";
 type ModalName = "new-game" | "add-player" | "amount" | "edit-movement" | "close-warning" | "login" | "setup" | "settings" | "delete-game" | "change-mode" | "edit-player" | "transfers" | null;
 
@@ -597,7 +598,8 @@ export default function Home() {
         {canEdit && (view === "live" || view === "cashout" || view === "summary") && activeGame.id !== "empty" && <div className={`save-state save-state--mobile ${saveState}`} role="status"><span />{activeGame.mode === "temporary" ? "Solo en esta pestaña" : saveState === "pending" ? "Guardado pendiente" : saveState === "saving" ? "Guardando cambios…" : "Guardado automático"}{saveState === "pending" && <button className="secondary" onClick={() => persistGames(games).catch(() => showToast("Todavía no se pudo guardar."))}>Reintentar guardado</button>}</div>}
         {(view === "live" || view === "cashout" || view === "summary") && activeGame.id !== "empty" && <div className="game-mode-note"><strong>{modeLabels[activeGame.mode || "chips"]}</strong>{activeGame.mode === "temporary" && <><span>Solo en esta pestaña. No se guarda al recargar o cerrar.</span><button className="secondary" onClick={() => { if (window.confirm("¿Descartar esta partida temporal y sus jugadores?")) { setGames((current) => current.filter((game) => game.id !== activeGame.id)); setView("home"); } }}>Descartar</button></>}</div>}
         {(view === "live" || view === "cashout" || view === "summary") && activeGame.inputCurrency === "USD" && <p className="game-mode-note">Buy-in original: {activeGame.inputBuyIn?.toLocaleString("es-PY")} USD = {money(activeGame.standardBuyIn)} · cambio fijo: 1 USD = {money(activeGame.exchangeRate ?? 6000)}. Operaciones en Gs.</p>}
-        {view === "calculator" && <ChipCalculator canEdit={canEdit} />}
+        {view === "sidepots" && <SidePotCalculator mesaPlayers={liveGame?.players.map(p=>({id:p.id,name:p.name})) ?? []} />}
+        {view === "calculator" && <><button className="secondary" onClick={()=>navigate("sidepots")}>Calculadora de Side Pots →</button><ChipCalculator canEdit={canEdit} /></>}
         {view === "home" && <section className="home-page">
           <section className="dashboard-intro">
             <div className="dashboard-intro__content">
@@ -621,7 +623,7 @@ export default function Home() {
             <button onClick={() => navigate("history")}><span className="home-link-icon"><AppIcon name="history" /></span><span><strong>Historial</strong><small>Explorar las sesiones de la casa</small></span><b aria-hidden="true">→</b></button>
             <button onClick={() => navigate("stats")}><span className="home-link-icon"><AppIcon name="stats" /></span><span><strong>Estadísticas</strong><small>Ver rankings y perfiles</small></span><b aria-hidden="true">→</b></button>
           </div>
-          <div className="home-links"><button onClick={() => navigate("calculator")}><span className="home-link-icon"><AppIcon name="cashout" /></span><span><strong>Calculadora de Fichas</strong><small>Preparar stacks, inventario y cambio</small></span><b aria-hidden="true">→</b></button></div>
+          <div className="home-links"><button onClick={() => navigate("sidepots")}><span className="home-link-icon"><AppIcon name="cashout" /></span><span><strong>Calculadora de Side Pots</strong><small>All-ins, pozos y distribución de premios</small></span><b aria-hidden="true">→</b></button><button onClick={() => navigate("calculator")}><span className="home-link-icon"><AppIcon name="cashout" /></span><span><strong>Calculadora de Fichas</strong><small>Preparar stacks, inventario y cambio</small></span><b aria-hidden="true">→</b></button></div>
           {canEdit && <AdminNotes />}
           {canEdit && temporaryGames.length > 0 && <section className="temporary-sessions">
             <div><span className="section-kicker">SOLO EN ESTA PESTAÑA</span><h2>Mesas temporales</h2></div>
