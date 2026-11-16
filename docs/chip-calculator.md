@@ -5,9 +5,9 @@ Herramienta independiente en Inicio y navegación «Fichas». No importa módulo
 ## Optimización y exactitud
 
 - Guaraníes y cantidades enteros seguros; valores incompatibles se rechazan sin redondear. Las ciegas manuales muestran el stack efectivo, aunque difiera de 50/100bb.
-- Enumeración de repartos exactos y búsqueda conjunta con poda, simetría y memoización. Respeta el stock de toda la mesa y prefiere stacks iguales cuando empatan.
+- Enumeración de repartos exactos y búsqueda conjunta con poda, simetría y memoización. Respeta el stock de toda la mesa y prefiere stacks iguales con la misma cobertura práctica; conserva el reparto mixto cuando las existencias lo requieren.
 - Recomendada y Más cambio priorizan que cada jugador pueda pagar varias BB con fichas distintas. Dentro del mismo nivel, favorecen fichas para apuestas, denominaciones intermedias para cambio y una parte importante del capital en fichas grandes.
-- La cantidad total de fichas es un criterio secundario. No hay un límite fijo por jugador. El banco conserva el inventario que no se repartió y se indica si tiene cambio para las ciegas.
+- La cantidad física se equilibra con una cobertura moderada de BB y fichas intermedias. El coste crece suavemente después de 25 y 30 fichas, sin excluir repartos mayores cuando el inventario los exige. No hay un límite fijo por jugador. El banco conserva el inventario que no se repartió y se indica si tiene cambio para las ciegas.
 - La búsqueda corre en un Web Worker. Límite de 2 millones de pasos y hasta 1.000 fichas por denominación. Si termina sin certificar óptimo, lo indica explícitamente; nunca confunde tiempo agotado con imposibilidad matemática. Puede pedir ajustar datos en inventarios complejos.
 
 ## Persistencia y movimientos
@@ -45,3 +45,17 @@ El selector abre por defecto Maletín 1. Sus seis denominaciones, dos escalas y 
 El motor de reparto se instancia con las denominaciones del maletín. Los valores personalizados se normalizan por su MCD únicamente para calcular: nunca se redondean ni se reemplazan. La búsqueda acotada, el reparto global, la prioridad de intermedias y el banco se reutilizan. Para denominaciones sin divisibilidad encadenada se usa búsqueda exacta de pagos y se desactivan las cotas basadas en esa propiedad. Los bancos confirmados conservan su propia instantánea de valores e inventario aunque después se editen las preferencias.
 
 Cambiar de maletín mantiene el borrador del formulario mientras la calculadora está abierta; Guardar configuración persiste sus preferencias para futuras visitas. Los repartos se recalculan al modificar valores y se descartan al cambiar de maletín. Los datos de prueba de existencias no se publican como inventario real.
+
+## Equilibrio compacto y solución de respaldo
+
+La cobertura deseada de BB crece moderadamente con el stack y se satura; no se intenta financiar cada apuesta futura. Más cambio le da mayor peso dentro de la misma evaluación. La selección automática de escala o valores compara el coste completo después de verificar la cobertura mínima: una BB adicional no gana automáticamente frente a un reparto mucho más compacto.
+
+Antes de la búsqueda conjunta se comparan semillas exactas con diferentes coberturas y combinaciones de un reparto igualitario. Si se agota el presupuesto de búsqueda, se conserva la mejor solución válida ya evaluada, con advertencia. Las podas por cantidad se deducen de una solución conocida y un límite inferior matemático; no son un máximo fijo de fichas. La reserva de cambio no se impone si empeora sustancialmente el reparto.
+
+Regresión de 40.000 Gs., SB/BB 200/400, siete jugadores, stock de prueba 80 por denominación:
+
+- 100/200/500/1.000/5.000: 20 fichas recomendadas (10×200, 3×1.000, 7×5.000), frente a 32 antes del ajuste.
+- Referencia del motor con seis denominaciones 100/200/500/1.000/2.000/5.000: 20 fichas (10×200, 4×2.000, 6×5.000). Se verifica el motor genérico sin añadir colores al Maletín 2.
+- Captura original, denominaciones hasta 2.000 y stock 80 por color: 42 fichas frente a 49. Con ese stock no hay capital suficiente en fichas altas para lograr un promedio de 30; se informa sin inventar la ficha de 5.000.
+
+`tests/chip-compact.test.mjs` comprueba estas regresiones, ambos tipos de cobertura de BB, valores personalizados inmutables, selección automática, stock limitado, falta de solución y repartos mayores de 30 cuando son inevitables. No se modifican preferencias ni bancos confirmados al recalcular.
