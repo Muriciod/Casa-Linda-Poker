@@ -2,12 +2,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { DENOMS, COLOR_CONFIG, COLOR_VALUES, chipValues, monetaryValue, DEFAULT_CONFIG, type Config, type Result, type SavedState, type Change, count, value, subtract, blinds, changeOptions, sessionBank, applyChange, validateConfig } from '../lib/chip-calculator';
 import './chip-calculator.css';
+import { DENOMINATION_STORAGE_KEY, denominationPreferences, restoreDenominationPreferences } from '../lib/chip-denomination-preferences';
 const names=['Blanca','Roja','Verde','Negra','Morada','Amarilla'];
 const colorNames=['Blanca','Roja','Verde','Azul','Negra'];
 const chipName=(c:Config,i:number)=>c.caseId===2?colorNames[i]:names[i];
 const chipLabel=(c:Config,i:number)=>c.caseId===2?colorNames[i]:money(chipValues(c)[i]);
 const caseLabel=(c:Config)=>c.caseId===2?'Maletín 2 · Fichas por colores':'Maletín 1 · Fichas numeradas';
-const equivalenceLabel=(c:Config)=>c.caseId===2?(c.autoValues===false?'Valores manuales':'Valores automáticos'):`1 punto = ${money(c.pointValue)}`;
+const equivalenceLabel=(c:Config)=>c.caseId===2?(c.autoValues===false?'Valores personalizados':'Valores automáticos'):`1 punto = ${money(c.pointValue)}`;
 const number=(n:number)=>n.toLocaleString('es-PY',{maximumFractionDigits:6});
 const money=(n:number)=>`${number(n)} Gs.`;
 // Original numbered chips, left to right: white, red, green, black, purple, yellow.
@@ -23,7 +24,7 @@ function Chip({i,config=DEFAULT_CONFIG}: {i:number;config?:Config}) {
 function StackCard({stack,config,title}:{stack:number[];config:Config;title:string}) {
   const n=count(stack);return <article className="chip-stack-card"><header><h3>{title}</h3><span className="chip-efficiency">{n<=14?'Reparto compacto':'Reparto ampliado'} · {n} fichas</span></header><div className="chip-stack-lines">{stack.map((qty,i)=>qty>0&&<div key={i}><Chip i={i} config={config}/><span><strong>{qty} × {chipLabel(config,i)}</strong><small>{chipName(config,i)} · {money(chipValues(config)[i])} cada una</small></span><b>{money(qty*chipValues(config)[i])}</b></div>)}</div><footer><strong>{money(monetaryValue(stack,config))}</strong><span>{number(config.buyIn/blinds(config).big)}bb</span></footer></article>;
 }
-const followSmallBlind=(original:Config):Config=>{const c={...original,mode:'balanced' as const};return c.caseId===2?{...c,pointValue:1,equivalence:'manual'}:({...c,pointValue:[100,1000].includes(c.pointValue)?c.pointValue:1000,equivalence:[100,1000].includes(c.pointValue)?c.equivalence??"auto":"auto"});};
+const followSmallBlind=(original:Config):Config=>{const c={...original,mode:'balanced' as const};return c.caseId===2?{...c,autoValues:c.autoValues===true,pointValue:1,equivalence:'manual'}:({...c,pointValue:[100,1000].includes(c.pointValue)?c.pointValue:1000,equivalence:[100,1000].includes(c.pointValue)?c.equivalence??"auto":"auto"});};
 export default function ChipCalculator({canEdit}:{canEdit:boolean}) {
   const [selected,setSelected]=useState<1|2>(1);
   const drafts=useRef<Partial<Record<1|2,Config>>>({});
@@ -39,13 +40,15 @@ function CaseCalculator({canEdit,selected,draft,onDraft,onBusy}:{canEdit:boolean
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[calculating,setCalculating]=useState(false);
   const [result,setResult]=useState<Result|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [alternatives,setAlternatives]=useState<{label:string;reason:string;result:Result}[]>([]);
+  const [preferenceNotice,setPreferenceNotice]=useState('');
   const [started,setStarted]=useState(false);
   const [denomination,setDenomination]=useState(3);
   const [showConfirmed,setShowConfirmed]=useState(false);
   const worker=useRef<Worker|null>(null);
-  async function load(useDraft=false){setError('');try{const response=await fetch(endpoint,{cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error);setStored({...data.state,config:followSmallBlind(data.state.config)});setConfig(followSmallBlind(useDraft&&draft?draft:data.state.config));setRevision(data.revision);setReady(true);setResult(null);}catch(e){setError(e instanceof Error?e.message:'No se pudo cargar.');}}
+  async function load(useDraft=false){setError('');try{const response=await fetch(endpoint,{cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error);setStored({...data.state,config:followSmallBlind(data.state.config)});let next=useDraft&&draft?draft:data.state.config;if(selected===2&&!(useDraft&&draft)){try{next=restoreDenominationPreferences(next,localStorage.getItem(DENOMINATION_STORAGE_KEY));}catch{next=restoreDenominationPreferences(next,null);}}setConfig(followSmallBlind(next));setRevision(data.revision);setReady(true);setResult(null);}catch(e){setError(e instanceof Error?e.message:'No se pudo cargar.');}}
   useEffect(()=>{void load(true);return()=>worker.current?.terminate();},[]);
   useEffect(()=>{onDraft(config);},[config]);
+  useEffect(()=>{if(!ready||selected!==2)return;const preferences=denominationPreferences(config);if(!preferences)return;try{localStorage.setItem(DENOMINATION_STORAGE_KEY,JSON.stringify(preferences));setPreferenceNotice('Modo y valores personalizados guardados en este dispositivo.');}catch{setPreferenceNotice('No se pudo guardar en este dispositivo.');}},[ready,selected,config.autoValues,config.chipValues]);
   useEffect(()=>{onBusy(busy||!ready);},[busy,ready]);
   function update(next:Partial<Config>){setAlternatives([]);worker.current?.terminate();setCalculating(false);setConfig(c=>followSmallBlind({...c,...next}));setResult(null);setError('');setNotice('');}
   async function save(state:SavedState,message:string){
@@ -69,7 +72,16 @@ function CaseCalculator({canEdit,selected,draft,onDraft,onBusy}:{canEdit:boolean
     <header className="chip-calculator-hero"><span className="section-kicker">PREPARÁ LA PRÓXIMA MESA</span><h1>Calculadora de Fichas</h1><p>Pocas fichas. El valor exacto. Un banco listo para dar cambio.</p><div className="chip-hero-rack" aria-hidden="true">{chipValues(config).map((_,i)=><Chip key={i} i={i} config={config}/>)}</div><small>Herramienta independiente · no crea partidas ni modifica estadísticas</small></header>
     <div className="chip-config-panel no-chip-print"><div className="chip-section-title"><span>01</span><div><h2>Configuración</h2><p>Ingresá el buy-in, los jugadores y el stack. Comparamos valores de fichas por vos.</p></div></div>
       <fieldset disabled={busy||!ready}>
-      {selected===2&&<section className="chip-values-editor"><h3>Valor de las fichas</h3><label>Asignación de valores<select value={config.autoValues===false?'manual':'auto'} onChange={e=>update({autoValues:e.target.value==='auto'})}><option value="auto">Automático según buy-in (recomendado)</option><option value="manual">Definir valores manualmente</option></select></label>{config.autoValues!==false&&<p className="chip-muted">Al calcular, elegimos valores fáciles de recordar de la serie 1–2–5: 100, 200, 500, 1.000, 2.000, 5.000, 10.000 Gs.… Los importes de referencia no son fijos; el reparto mostrará los valores recomendados.</p>}<p className="chip-muted">Referencia manual en guaraníes, de menor a mayor. Estas fichas no tienen números impresos.</p><div className="chip-inventory-grid">{chipValues(config).map((v,i)=><label key={i}><Chip i={i} config={config}/><strong>{colorNames[i]} · Gs.</strong><input disabled={config.autoValues!==false} aria-label={`Valor de ficha ${colorNames[i]}`} type="number" min="1" step="1" value={v||''} onChange={e=>update({chipValues:chipValues(config).map((n,j)=>j===i?Number(e.target.value):n)})}/></label>)}</div><button className="secondary" onClick={()=>{if(window.confirm('¿Restaurar los valores predeterminados del Maletín 2? El banco confirmado conserva sus valores.'))update({chipValues:[...COLOR_VALUES]});}}>Restaurar valores predeterminados</button></section>}
+      {selected===2&&<section className="chip-values-editor"><h3>Denominaciones del Maletín 2</h3>
+        <div className="chip-mode-picker" role="group" aria-label="Modo de denominación">
+          <button type="button" aria-pressed={!config.autoValues} onClick={()=>update({autoValues:false})}><strong>Valores personalizados</strong><small>Usar exactamente los importes que configuraste.</small></button>
+          <button type="button" aria-pressed={config.autoValues===true} onClick={()=>update({autoValues:true})}><strong>Valores automáticos (recomendados)</strong><small>Proponer denominaciones según buy-in, ciegas e inventario.</small></button>
+        </div>
+        <p className="chip-muted"><strong>Modo activo: {config.autoValues?'Automático':'Personalizado'}.</strong> {config.autoValues?'Los resultados mostrarán valores automáticos de la serie 1–2–5. Tus valores personalizados se conservan aparte.':'Solo cambia la cantidad de fichas del reparto; sus valores se mantienen exactamente como los ingresaste.'}</p>
+        {!config.autoValues?<><div className="chip-inventory-grid">{chipValues(config).map((v,i)=><label key={i}><Chip i={i} config={config}/><strong>{colorNames[i]} · Gs.</strong><input aria-label={`Valor de ficha ${colorNames[i]}`} type="number" inputMode="numeric" min="1" step="1" value={v||''} onChange={e=>update({autoValues:false,chipValues:chipValues(config).map((n,j)=>j===i?Number(e.target.value):n)})}/></label>)}</div>
+        <button type="button" className="secondary" onClick={()=>{if(window.confirm('¿Restaurar tus valores personalizados predeterminados? El banco confirmado conserva sus valores.'))update({autoValues:false,chipValues:[...COLOR_VALUES]});}}>Restaurar valores personalizados predeterminados</button></>:<button type="button" className="secondary" onClick={()=>update({autoValues:false})}>Ver o editar mis valores personalizados</button>}
+        <p className="chip-muted" role="status">{preferenceNotice}{canEdit?' Usá Guardar configuración para compartirlos entre dispositivos.':''}</p>
+      </section>}
       {selected===2&&!count(config.inventory)&&<p className="chip-warning" role="status">Completá el inventario del Maletín 2 para calcular un reparto exacto. No hay cantidades asignadas.</p>}
       <div className="chip-form-grid">
         <label>Buy-in por jugador · Gs.<input type="number" min="1" step="1" value={config.buyIn||''} onChange={e=>update({buyIn:Number(e.target.value)})}/></label>
