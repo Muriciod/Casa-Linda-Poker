@@ -6,7 +6,7 @@ Herramienta independiente en Inicio y navegación «Fichas». No importa módulo
 
 - Guaraníes y cantidades enteros seguros; valores incompatibles se rechazan sin redondear. Las ciegas manuales muestran el stack efectivo, aunque difiera de 50/100bb.
 - Enumeración de repartos exactos y búsqueda conjunta con poda, simetría y memoización. Respeta el stock de toda la mesa y prefiere stacks iguales cuando empatan.
-- Recomendada y Más cambio priorizan que cada jugador pueda pagar SB y BB con fichas distintas. Dentro del mismo nivel, favorecen fichas para apuestas, denominaciones intermedias para cambio y una parte importante del capital en fichas grandes.
+- Recomendada y Más cambio priorizan que cada jugador pueda pagar varias BB con fichas distintas. Dentro del mismo nivel, favorecen fichas para apuestas, denominaciones intermedias para cambio y una parte importante del capital en fichas grandes.
 - La cantidad total de fichas es un criterio secundario. No hay un límite fijo por jugador. El banco conserva el inventario que no se repartió y se indica si tiene cambio para las ciegas.
 - La búsqueda corre en un Web Worker. Límite de 2 millones de pasos y hasta 1.000 fichas por denominación. Si termina sin certificar óptimo, lo indica explícitamente; nunca confunde tiempo agotado con imposibilidad matemática. Puede pedir ajustar datos en inventarios complejos.
 
@@ -32,9 +32,9 @@ Los bancos confirmados con una escala anterior se conservan y se identifican com
 
 ## Utilidad de las fichas según las ciegas
 
-El modo equilibrado cubre una SB y una BB con fichas distintas. Busca además dos fichas intermedias, o una si el inventario no permite dos, reservadas aparte de las ciegas. Selecciona una denominación entre media BB y cuatro BB: prefiere múltiplos exactos y después la más cercana. Esta cantidad acotada evita llenar el stack con intermedias. Una roja de 500 Gs. nunca se considera un pago exacto de BB 400 Gs.
+El modo equilibrado intenta que todos puedan cubrir varias BB con fichas distintas. Favorece las fichas de 1 BB y, cuando faltan, busca combinaciones exactas con denominaciones menores. Conserva fichas intermedias para apuestas y cambio y fichas grandes para representar el capital. El objetivo de cobertura se adapta al stack y al inventario; no es una cantidad fija de fichas por jugador.
 
-Dentro de cada nivel, el motor puntúa combinaciones de apuestas (2 y 3 BB), fichas cercanas a la BB, una denominación intermedia para cambios y fichas grandes para representar el capital. Penaliza acumular fichas mínimas y concentrar demasiado valor en una sola denominación. Las metas de cantidad dependen del stack y de los valores disponibles; Más cambio aumenta el peso de las fichas para apostar sin bajar el nivel de ciegas.
+No se exige que cada stack pague la SB exacta si una ficha o combinación de BB permite devolver la diferencia. El motor intenta conservar cambio para la mesa con el inventario sobrante, sin reducir los buy-ins ni la cobertura mínima de BB. El resultado muestra cuántos pagos se pueden hacer y avisa si es necesario preparar cambio manual.
 
 Las escalas siguen siendo ×100/×1.000. 50.000 Gs. a 100bb implica SB 250 Gs., incompatible con ambas: se informa sin redondear.
 

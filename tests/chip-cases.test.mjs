@@ -10,10 +10,10 @@ test('color case starts empty, correct values, strict positive ascending custom 
  assert.deepEqual(c.validateConfig(config({chipValues:[1000,2000,5000,10000,20000]})),[]);
  assert.throws(()=>c.calculate({...c.DEFAULT_CONFIG,pointValue:1}),/escalas/);
 });
-test('both stack modes, 2–10 players, exact blinds and useful intermediates with default/custom values',()=>{
+test('both stack modes, 2–10 players, repeatable BBs and shared SB change with default/custom values',()=>{
  for(const chipValues of [c.COLOR_VALUES,[1000,2000,5000,10000,20000]])for(const bb of [50,100])for(let players=2;players<=10;players++){
   const r=c.recommend(config({chipValues,bb,players,buyIn:chipValues[0]*bb*2}))[0].result;exact(r);assert.equal(r.comfort,3);const b=c.blinds(r.config);
-  for(const row of r.stacks){assert.ok(payable(row,chipValues,b.small));assert.ok(payable(row,chipValues,b.big));assert.ok(row[0]<=2);assert.ok(row[1]>=2);}
+  for(const row of r.stacks){assert.ok(payable(row,chipValues,b.small)||payable(r.bank,chipValues,b.big-b.small));assert.ok(payable(row,chipValues,b.big));assert.ok(row[0]<=2);assert.ok(row[1]>=2);}
  }
 });
 test('incompatible blinds and inventory are explained without altering denominations',()=>{
@@ -51,7 +51,7 @@ test('custom minimum allocation agrees with independent exhaustive oracle for no
 
 test('automatic color values follow buy-in, both blinds modes and inventory while manual remains fixed',()=>{
  for(const buyIn of [20000,30000,40000,100000,500000])for(const bb of [50,100])for(const players of [2,10]){
- const input=config({buyIn,bb,players,autoValues:true});let r;try{r=c.recommend(input)[0].result;}catch(e){throw Error(`${buyIn}/${bb}/${players}: ${e.message}`);}exact(r);assert.ok(r.config.chipValues.every(v=>{while(v%10===0)v/=10;return [1,2,5].includes(v);}));const b=c.blinds(input);for(const row of r.stacks){assert.ok(payable(row,r.config.chipValues,b.small));assert.ok(payable(row,r.config.chipValues,b.big));}assert.deepEqual(input.chipValues,c.COLOR_VALUES);
+ const input=config({buyIn,bb,players,autoValues:true});let r;try{r=c.recommend(input)[0].result;}catch(e){throw Error(`${buyIn}/${bb}/${players}: ${e.message}`);}exact(r);assert.ok(r.config.chipValues.every(v=>{while(v%10===0)v/=10;return [1,2,5].includes(v);}));const b=c.blinds(input);for(const row of r.stacks){assert.ok(payable(row,r.config.chipValues,b.small)||payable(r.bank,r.config.chipValues,b.big-b.small)||r.warnings.some(w=>w.includes('cambio manual')));assert.ok(payable(row,r.config.chipValues,b.big));}assert.deepEqual(input.chipValues,c.COLOR_VALUES);
  }
  assert.notDeepEqual(c.recommend(config({buyIn:20000,autoValues:true}))[0].result.config.chipValues,c.COLOR_VALUES);
  assert.throws(()=>c.recommend(config({buyIn:20000,autoValues:false})),/compatibles/);
@@ -67,12 +67,12 @@ test('only practical alternatives, including legacy minimum preferences, preserv
   config({buyIn:40000,players:8,autoValues:true,mode:'minimum'})
  ];
  for(const input of inputs){const before=structuredClone(input);const options=c.recommend(input);assert.deepEqual(options.map(x=>x.label),['Recomendada','Más cambio']);assert.deepEqual(input,before);
-  for(const {result:r} of options){exact(r);assert.equal(r.config.mode,'balanced');assert.ok(r.comfort>0);const values=c.chipValues(r.config),b=c.blinds(r.config);for(const row of r.stacks){assert.ok(row.reduce((a,b)=>a+b,0)>1);assert.ok(payable(row,values,b.small));assert.ok(payable(row,values,b.big));}}
+  for(const {result:r} of options){exact(r);assert.equal(r.config.mode,'balanced');assert.ok(r.comfort>0);const values=c.chipValues(r.config),b=c.blinds(r.config);for(const row of r.stacks){assert.ok(row.reduce((a,b)=>a+b,0)>1);assert.ok(payable(row,values,b.small)||payable(r.bank,values,b.big-b.small)||r.warnings.some(w=>w.includes('cambio manual')));assert.ok(payable(row,values,b.big));}}
   assert.ok(options[1].result.comfort>=options[0].result.comfort);
  }
 });
 test('more change increases useful intermediate chips without changing the scale or excessive whites',()=>{
- const options=c.recommend(config({buyIn:1000000,players:6,autoValues:false}));const a=options[0].result,b=options[1].result;
+ const options=c.recommend(config({buyIn:500000,players:6,autoValues:false}));const a=options[0].result,b=options[1].result;
  assert.deepEqual(c.chipValues(a.config),c.chipValues(b.config));assert.notDeepEqual(a.stacks,b.stacks);
  const intermediate=c.chipValues(a.config).indexOf(c.blinds(a.config).big);assert.ok(intermediate>=0);
  for(let i=0;i<a.stacks.length;i++){assert.ok(b.stacks[i][intermediate]>a.stacks[i][intermediate]);assert.ok(b.stacks[i][0]<=2);}
@@ -92,14 +92,43 @@ test('casino-style stacks cover exact opening bets and spread change and capital
    exact(result);assert.deepEqual(result.config.chipValues,input.chipValues);assert.ok(result.reserve);
    for(const row of result.stacks){
     assert.ok(row[bbIndex]>=3);assert.ok(row[changeIndex]>=2);
-    const afterSmall=[...row];const sbIndex=input.chipValues.indexOf(input.small);assert.ok(afterSmall[sbIndex]>0);afterSmall[sbIndex]--;
-    assert.ok(afterSmall[bbIndex]>=3);
+    const sbIndex=input.chipValues.indexOf(input.small);assert.ok(result.bank[sbIndex]>=result.changePayments);
     assert.ok(payable(row,input.chipValues,3*input.big));
     const capital=row.reduce((sum,n,i)=>sum+(input.chipValues[i]>=100000?n*input.chipValues[i]:0),0);
-    assert.ok(capital>=input.buyIn*.4);assert.ok(c.count(row)<=20);
+    assert.ok(capital>=input.buyIn*.4);assert.ok(c.count(row)<=24);
    }
   }
   if(input.buyIn===1000000)assert.ok(options[0].result.stacks.every(row=>row[4]===1));
   assert.ok(options[1].result.stacks.reduce((n,row)=>n+row[bbIndex],0)>=options[0].result.stacks.reduce((n,row)=>n+row[bbIndex],0));
  }
+});
+
+
+test('35k at 50/100 puts more 100s in every stack and leaves the 50s for change',()=>{
+ const input=config({buyIn:35000,small:50,big:100,automatic:false,players:6,chipValues:[50,100,200,1000,5000],inventory:[80,80,80,80,30]});
+ for(const {result:r} of c.recommend(input)){
+  exact(r);assert.deepEqual(r.config.chipValues,input.chipValues);assert.ok(r.changePayments>=3);assert.ok(r.bank[0]>=r.changePayments);
+  for(const row of r.stacks){assert.ok(row[1]>3);assert.ok(row[0]<2);assert.ok(row[1]>=r.bigBlindPayments);}
+ }
+});
+
+test('pairs of small chips fund several BBs when the exact denomination is missing',()=>{
+ for(const players of [2,6,10]){
+  const input=config({buyIn:100,small:1,big:2,automatic:false,players,chipValues:[1,2,5,10,25],inventory:[players*20,0,players*20,0,0]});
+  const missing=c.recommend(input)[0].result;exact(missing);assert.ok(missing.bigBlindPayments>=4);assert.ok(missing.bank[0]>=missing.changePayments);
+  assert.ok(missing.stacks.every(row=>row[0]>=2*missing.bigBlindPayments));
+  const stocked=c.recommend({...input,inventory:[...input.inventory.slice(0,1),players*20,...input.inventory.slice(2)]})[0].result;
+  exact(stocked);assert.ok(stocked.stacks.every((row,i)=>row[1]>=stocked.bigBlindPayments&&row[0]<missing.stacks[i][0]));
+ }
+ const input=config({buyIn:500000,small:10000,big:20000,automatic:false,players:6,chipValues:[5000,10000,50000,100000,500000],inventory:[80,80,80,0,0]});
+ const r=c.recommend(input)[0].result;exact(r);assert.ok(r.bigBlindPayments>=4);
+ assert.ok(r.stacks.every(row=>row[1]>=2*r.bigBlindPayments));assert.ok(r.bank[1]+Math.floor(r.bank[0]/2)>=r.changePayments);
+});
+
+test('total value cannot masquerade as repeatable disjoint BB payments',()=>{
+ const input=config({buyIn:16,small:1,big:6,automatic:false,players:2,chipValues:[2,5,10,20,50],inventory:[6,6,0,0,0]});
+ const r=c.calculate(input);exact(r);assert.equal(r.bigBlindPayments,1);assert.equal(r.changePayments,1);assert.equal(r.smallBlindDirect,false);
+ assert.ok(r.stacks.every(row=>row[0]===3&&row[1]===2));
+ const stock=config({buyIn:10,small:1,big:2,automatic:false,players:2,chipValues:[1,2,5,10,25],inventory:[2,0,4,0,0]});
+ const scarce=c.calculate(stock);exact(scarce);assert.equal(scarce.bigBlindPayments,0);assert.ok(scarce.warnings.some(w=>w.includes('poca cobertura')));
 });

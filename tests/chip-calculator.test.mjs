@@ -8,7 +8,7 @@ const c=await import('data:text/javascript;base64,'+Buffer.from(js).toString('ba
 const config=(extra={})=>({...structuredClone(c.DEFAULT_CONFIG),...extra});
 function invariants(r){assert.equal(r.stacks.length,r.config.players);for(const row of r.stacks)assert.equal(c.value(row)*r.config.pointValue,r.config.buyIn);assert.ok(r.bank.every(n=>n>=0));assert.equal(c.value(r.bank)+r.stacks.reduce((n,row)=>n+c.value(row),0),c.value(r.config.inventory));for(let i=0;i<6;i++)assert.equal(r.bank[i]+r.stacks.reduce((n,row)=>n+row[i],0),r.config.inventory[i]);}
 test('real inventory, exact 50bb and incompatible 100bb suggestion',()=>{assert.equal(c.count(c.INITIAL_INVENTORY),500);assert.deepEqual(c.blinds(config()),{small:5000,big:10000});assert.deepEqual(c.blinds(config({bb:100})),{small:2500,big:5000});assert.throws(()=>c.calculate(config({bb:100})),/×100/);invariants(c.calculate(config({bb:100,pointValue:100})));});
-test('2–10 players: both modes exact, conserve inventory, balanced can pay both blinds',()=>{for(let players=2;players<=10;players++)for(const mode of ['balanced','minimum']){const r=c.calculate(config({players,mode}));invariants(r);if(mode==='balanced'){assert.equal(r.balanced,true);for(const row of r.stacks){assert.ok(c.canPay(5,row));assert.ok(c.canPay(10,row));}}else assert.ok(r.stacks.every(row=>c.count(row)===1));}});
+test('2–10 players: both modes exact, conserve inventory, balanced can pay the big blind',()=>{for(let players=2;players<=10;players++)for(const mode of ['balanced','minimum']){const r=c.calculate(config({players,mode}));invariants(r);if(mode==='balanced'){assert.equal(r.balanced,true);for(const row of r.stacks){assert.ok(c.canPay(10,row));assert.ok(c.canPay(5,row)||c.canPay(5,r.bank));}}else assert.ok(r.stacks.every(row=>c.count(row)===1));}});
 test('insufficient value, unrepresentable buy-in, no blind denominations, fractional currency',()=>{assert.throws(()=>c.calculate(config({inventory:[20,2,1,1,0,0]})),/insuficiente/);assert.throws(()=>c.calculate(config({buyIn:500001,automatic:false})),/equivalencia/);assert.throws(()=>c.calculate(config({inventory:[0,0,0,100,25,25]})),/ciegas/);assert.throws(()=>c.calculate(config({buyIn:51,pointValue:100})),/enteros/);assert.throws(()=>c.calculate(config({inventory:[-1,1,1,1,1,1]})),/Revisá/);});
 test('scarce inventory uses unequal exact allocations simultaneously',()=>{const r=c.calculate(config({buyIn:100000,players:2,automatic:false,small:1000,big:5000,mode:'minimum',inventory:[5,1,4,1,0,0]}));invariants(r);assert.notDeepEqual(r.stacks[0],r.stacks[1]);assert.equal(r.stacks.reduce((n,row)=>n+c.count(row),0),5);});
 test('alternative above 14 when no smaller physical solution exists',()=>{const r=c.calculate(config({buyIn:15000,pointValue:1000,players:2,automatic:false,small:1000,big:1000,mode:'minimum',inventory:[30,0,0,0,0,0]}));invariants(r);assert.deepEqual(r.stacks.map(c.count),[15,15]);assert.ok(!r.warnings.some(w=>w.includes('14')));});
@@ -36,20 +36,19 @@ test('only two scales in every entry point; 30k/50bb works and 30k/100bb explain
 test('playability outranks chip count and stock remains exact across requested tables',()=>{
  for(const buyIn of [20000,30000,100000])for(const players of [2,5,8,10])for(const bb of [50,100]){
   if(buyIn===30000&&bb===100){assert.throws(()=>c.recommend(config({buyIn,players,bb})));continue;}
-  const r=c.recommend(config({buyIn,players,bb}))[0].result;invariants(r);assert.ok(r.comfort>=1,JSON.stringify({buyIn,players,bb,warnings:r.warnings}));const b=c.blinds(r.config);for(const row of r.stacks)assert.ok(c.canFundPayments(row,c.openingPayments(b.small/r.config.pointValue,b.big/r.config.pointValue,r.comfort)));assert.ok(!r.warnings.some(w=>w.includes('14')));
+  const r=c.recommend(config({buyIn,players,bb}))[0].result;invariants(r);assert.ok(r.comfort>=1,JSON.stringify({buyIn,players,bb,warnings:r.warnings}));const b=c.blinds(r.config);for(const row of r.stacks)assert.ok(c.canFundPayments(row,Array(r.bigBlindPayments).fill(b.big/r.config.pointValue)));assert.ok(!r.warnings.some(w=>w.includes('14')));
  }
  assert.throws(()=>c.recommend(config({buyIn:50000,bb:100})),/compatibles/);
- const comfortable=c.calculate(config({buyIn:20000,players:2,pointValue:100}));assert.equal(comfortable.comfort,3);assert.ok(comfortable.stacks.every(row=>row[0]<=10&&row[1]>=2));
- const many=c.calculate(config({buyIn:4000,pointValue:100,players:2,automatic:false,small:100,big:200,inventory:[80,0,0,0,0,0]}));invariants(many);assert.equal(c.count(many.stacks[0]),40);assert.equal(many.comfort,1);
+ const comfortable=c.calculate(config({buyIn:20000,players:2,pointValue:100}));assert.equal(comfortable.comfort,3);assert.ok(comfortable.stacks.every(row=>row[0]>=12&&row[0]<=24));
+ const many=c.calculate(config({buyIn:4000,pointValue:100,players:2,automatic:false,small:100,big:200,inventory:[80,0,0,0,0,0]}));invariants(many);assert.equal(c.count(many.stacks[0]),40);assert.ok(many.bigBlindPayments>=3);
  const scarce=c.calculate(config({buyIn:20000,players:10,pointValue:100,inventory:[8,150,100,100,25,25]}));invariants(scarce);assert.equal(scarce.comfort,0);assert.ok(scarce.warnings.some(w=>w.includes('inventario')));
 });
 
- test('betting chips complement exact blinds without excessive whites, 2–10 players',()=>{
+ test('betting chips cover separately funded BBs, 2–10 players',()=>{
  for(const buyIn of [20000,30000,100000])for(let players=2;players<=10;players++){
  const r=c.calculate(config({buyIn,players,pointValue:100,bb:50}));invariants(r);
- const b=c.blinds(r.config);for(const row of r.stacks){assert.ok(c.bettingReady(row,b.small/100,b.big/100,r.comfort));assert.ok(c.canFundPayments(row,[b.small/100,b.big/100]));if(buyIn<=30000)assert.ok(row[0]<=10);}
+ const b=c.blinds(r.config);for(const row of r.stacks){assert.ok(c.canFundPayments(row,Array(r.bigBlindPayments).fill(b.big/100)));}
  }
  assert.equal(c.canPay(4,[0,1,0,0,0,0]),false);
- assert.equal(c.bettingDenomination(4),1);
  for(let players=2;players<=10;players++)assert.throws(()=>c.recommend(config({buyIn:50000,players,bb:100})),/compatibles/);
  });

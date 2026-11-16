@@ -3,7 +3,7 @@ export const DENOMS = [1, 5, 25, 100, 500, 1000];
 export const INITIAL_INVENTORY = [100, 150, 100, 100, 25, 25];
 export type Config = { caseId?: 1 | 2; autoValues?: boolean; chipValues?: number[]; equivalence?: "auto" | "manual"; buyIn: number; players: number; bb: 50 | 100; automatic: boolean; small: number; big: number; pointValue: number; mode: 'minimum' | 'balanced'; inventory: number[] };
 export const DEFAULT_CONFIG: Config = { buyIn: 500000, players: 6, bb: 50, automatic: true, small: 5000, big: 10000, pointValue: 1000, mode: 'balanced', inventory: [...INITIAL_INVENTORY] };
-export type Result = {config: Config; stacks: number[][]; bank: number[]; warnings: string[]; optimal: boolean; balanced: boolean; reserve: boolean; comfort: number};
+export type Result = {config: Config; stacks: number[][]; bank: number[]; warnings: string[]; optimal: boolean; balanced: boolean; reserve: boolean; comfort: number; bigBlindPayments: number; changePayments: number; smallBlindDirect: boolean};
 export type Change = { denomination: number; given: number[] };
 export type Session = {config:Config; stacks:number[][]; changes:Change[]};
 export type SavedState = {config:Config; session:Session|null};
@@ -72,7 +72,7 @@ function canPay(target: number, stock: number[]) {
   for(let i=DENOMS.length-1;i>=0;i--)target-=Math.min(stock[i],Math.floor(target/DENOMS[i]))*DENOMS[i];
   return target===0;
 }
-function canFundPayments(row:number[], payments:number[]):boolean {
+function canFundPayments(row:number[], payments:number[],tick:()=>void=()=>{}):boolean {
   if(payments.reduce((s,n)=>s+n,0)>value(row)||payments.some(n=>!canPay(n,row)))return false;
   // Fast constructive proof for the common case; retain exhaustive fallback.
   const remaining=[...row];let paid=true;
@@ -80,58 +80,90 @@ function canFundPayments(row:number[], payments:number[]):boolean {
   if(paid)return true;
   const failed=new Set<string>();
   function visit(stock:number[], index:number):boolean{
-    if(index===payments.length)return true;
+    tick();if(index===payments.length)return true;
     const key=index+':'+stock.join(',');if(failed.has(key))return false;
-    const options=patterns(payments[index],stock,count(stock),()=>{}).sort(rank);
+    const options=patterns(payments[index],stock,count(stock),tick).sort(rank);
     for(const payment of options)if(visit(subtract(stock,payment),index+1))return true;
     failed.add(key);return false;
   }
   return visit(row,0);
 }
-function readyForBlinds(row:number[],small:number,big:number){return canFundPayments(row,[small,big]);}
-// Prefer exact BB multiples, otherwise a nearby betting chip; never call it a BB.
-function bettingDenomination(big:number):number {
-  const options=DENOMS.map((d,i)=>({d,i})).filter(x=>x.d>=big/2&&x.d<=big*4&&x.d>1);
-  options.sort((a,b)=>Number(b.d%big===0)-Number(a.d%big===0)||Math.abs(Math.log(a.d/big))-Math.abs(Math.log(b.d/big)));
-  return options[0]?.i??-1;
+// Count disjoint payments, not just whether their combined amount is payable.
+function paymentCounter(amount:number,limit:number,inventory:number[],tick:()=>void){
+  const optionsStock=inventory.map((n,i)=>Math.min(n,Math.floor(amount/DENOMS[i])));
+  const direct=DENOMS.indexOf(amount);
+  const usable=DENOMS.filter((d,i)=>d<amount&&optionsStock[i]>0);
+  const divisible=usable.every((d,i)=>i===0||d%usable[i-1]===0);
+  const memo=new Map<string,number>();
+  let options:number[][]|undefined;
+  function combined(stock:number[],want:number):number{
+    want=Math.min(want,Math.floor(value(stock)/amount));
+    if(!want)return 0;
+    const key=want+':'+stock.join(',');
+    const previous=memo.get(key);if(previous!==undefined)return previous;
+    const remaining=[...stock];let paid=0;
+    for(;paid<want;paid++){
+      let left=amount;
+      for(let i=DENOMS.length-1;i>=0;i--){const n=Math.min(remaining[i],Math.floor(left/DENOMS[i]));remaining[i]-=n;left-=n*DENOMS[i];}
+      if(left)break;
+    }
+    if(paid<want&&!divisible){
+      options??=patterns(amount,optionsStock.map((n,i)=>DENOMS[i]<amount?n:0),count(optionsStock),tick).sort(rank);
+      for(const row of options){
+        tick();if(row.some((n,i)=>n>stock[i]))continue;
+        paid=Math.max(paid,1+combined(subtract(stock,row),want-1));
+        if(paid===want)break;
+      }
+    }
+    if(memo.size<20000)memo.set(key,paid);
+    return paid;
+  }
+  return (row:number[],requested=limit)=>{
+    const singles=direct<0?0:Math.min(row[direct],requested),pending=requested-singles;
+    if(!pending)return singles;
+    const stock=row.map((n,i)=>DENOMS[i]<amount?Math.min(n,optionsStock[i]*pending):0);
+    return singles+combined(stock,pending);
+  };
 }
-function openingPayments(small:number,big:number,level:number):number[]{return level>0?[small,big]:[];}
-function bettingReady(row:number[],small:number,big:number,level:number):boolean {
-  const remaining=[...row],i=bettingDenomination(big),qty=Math.max(0,level-1);
-  if(qty){if(i<0||remaining[i]<qty)return false;remaining[i]-=qty;}
-  return canFundPayments(remaining,openingPayments(small,big,level));
+function bettingGoal(target:number,big:number,moreChange:boolean){
+  const depth=target/big;
+  return Math.min(Math.floor(depth),Math.max(3,Math.min(12,Math.round(Math.sqrt(depth))+(moreChange?2:0))));
 }
-// Soft targets, scaled to the blinds and the actual stack. Opening SB + BB
-// remains a separate, higher priority: these costs only compare feasible rows.
-function stackCost(target:number,big:number,stock:number[],moreChange:boolean){
-  const betting=bettingDenomination(big);
+// Preserve the casino-style mix of betting, bridging and capital chips, but
+// reward repeatable exact BB payments before trying to reduce change chips.
+function stackCost(target:number,big:number,stock:number[],moreChange:boolean,rounds:(row:number[])=>number){
+  const exact=DENOMS.indexOf(big);
+  const hasExact=exact>=0&&stock[exact]>0;
+  const goal=bettingGoal(target,big,moreChange);
   const top=DENOMS.reduce((last,d,i)=>d<=target&&stock[i]>0?i:last,-1);
-  const bridge=DENOMS.map((d,i)=>({d,i})).filter(({d,i})=>i!==betting&&i!==top&&d>big*2&&d<=big*8&&stock[i]>0&&d<=target*.3)
+  const bridge=DENOMS.map((d,i)=>({d,i})).filter(({d,i})=>i!==top&&d>big*2&&d<=big*8&&stock[i]>0&&d<=target*.3)
     .sort((a,b)=>Math.abs(a.d-big*5)-Math.abs(b.d-big*5))[0];
-  const bettingGoal=betting<0?0:Math.min(moreChange?8:5,Math.floor(target*.22/DENOMS[betting]));
   const bridgeGoal=bridge?Math.min(3,Math.floor(target*.3/bridge.d)):0;
   const isCapital=(d:number,i:number)=>d>big*8||(i===top&&d>big*3&&!!bridge);
   const hasCapital=DENOMS.some((d,i)=>isCapital(d,i)&&d<=target&&stock[i]>0);
   return (row:number[])=>{
-    let tiny=0, capital=0, largestPile=0;
+    let smallValue=0, capital=0, largestPile=0;
     for(let i=0;i<DENOMS.length;i++){
       const d=DENOMS[i],pile=row[i]*d;
-      if(d<big/2)tiny+=row[i];
+      if(d<big)smallValue+=pile;
       if(isCapital(d,i))capital+=pile;
       largestPile=Math.max(largestPile,pile);
     }
+    const covered=rounds(row),direct=hasExact?Math.min(row[exact],goal):0;
+    const extraSmall=Math.ceil(Math.max(0,smallValue-(covered-direct)*big)/big);
     let missedRaises=0;
-    for(const amount of [2*big,3*big])if(amount<=target&&!canPay(amount,row))missedRaises++;
-    const missingBetting=betting<0?0:Math.max(0,bettingGoal-row[betting]);
+    for(const multiple of [2,3])if(covered<multiple&&multiple<=target/big&&!canPay(multiple*big,row))missedRaises++;
     const missingBridge=bridge?Math.max(0,bridgeGoal-row[bridge.i]):0;
     const capitalShortfall=hasCapital?Math.ceil(Math.max(0,target*.5-capital)/Math.max(3*big,target/15)):0;
     const concentration=Math.ceil(Math.max(0,largestPile-target*.75)/Math.max(5*big,target/12));
-    return count(row)+2*tiny+(moreChange?6:4)*missingBetting+5*missingBridge+3*missedRaises+2*capitalShortfall+3*concentration;
+    return count(row)+3*extraSmall+6*Math.max(0,goal-covered)+(hasExact?2*(goal-direct):0)+5*missingBridge+3*missedRaises+2*capitalShortfall+3*concentration;
   };
 }
 function tableCost(r:Result,moreChange=false){
-  const {big}=blinds(r.config),scale=factor(r.config);
-  const cost=stackCost(r.config.buyIn/scale,big/scale,r.config.inventory,moreChange);
+  const {big}=blinds(r.config),scale=factor(r.config),b=big/scale,target=r.config.buyIn/scale;
+  let steps=0;
+  const rounds=paymentCounter(b,bettingGoal(target,b,moreChange),r.config.inventory,()=>{if(++steps>2000000)throw Error('La búsqueda de pagos alcanzó su límite.');});
+  const cost=stackCost(target,b,r.config.inventory,moreChange,rounds);
   return r.stacks.reduce((s,row)=>s+cost(row),0);
 }
 // Bounded dynamic programming seed; binary bundles keep the cost proportional to
@@ -162,15 +194,22 @@ function calculate(c: Config, moreChange=false): Result {
     throw Error(incompatibleBlinds(c));
   }
   const sb=small/factor(c), bb=big/factor(c);
-  if(!canPay(sb,c.inventory)||!canPay(bb,c.inventory))throw Error(c.caseId===2?incompatibleBlinds(c):'El inventario no permite pagar exactamente las ciegas. Agregá denominaciones pequeñas o ajustá las ciegas.');
+  const changeSize=bb-sb;
+  const needsExactSmall=changeSize>0&&!canPay(changeSize,c.inventory);
+  if(!canPay(bb,c.inventory)||(needsExactSmall&&!canPay(sb,c.inventory)))throw Error(c.caseId===2?incompatibleBlinds(c):'El inventario no permite pagar exactamente las ciegas, ni devolver la diferencia de la SB. Revisá las denominaciones.');
   if(value(c.inventory)<target*c.players)throw Error('Inventario insuficiente para cubrir el buy-in de todos los jugadores.');
-  const intermediate=bettingDenomination(bb);
-  const rowCost=c.mode==='minimum'?count:stackCost(target,bb,c.inventory,moreChange);
+  const goal=bettingGoal(target,bb,moreChange);
+  const changeGoal=changeSize>0&&!needsExactSmall?Math.ceil(c.players/2):0;
   let steps=0, interrupted=false;
   const tick=()=>{if(++steps>2000000){interrupted=true;throw Error('La búsqueda alcanzó su límite. Ajustá el buy-in o el inventario para poder verificar el reparto.');}};
-  function solve(pool: number[], cap: number, comfort: number): {stacks:number[][]; optimal:boolean}|null {
+  const rounds=paymentCounter(bb,goal,c.inventory,tick);
+  const countChange=changeGoal?paymentCounter(changeSize,changeGoal,c.inventory,tick):()=>0;
+  const rowCost=c.mode==='minimum'?count:stackCost(target,bb,c.inventory,moreChange,rounds);
+  const ready=(row:number[],comfort:number)=>comfort===0||(rounds(row,comfort)>=comfort&&(!needsExactSmall||canFundPayments(row,[sb,...Array(comfort).fill(bb)],tick)));
+  const remainingBank=(rows:number[][])=>rows.reduce((stock,row)=>subtract(stock,row),[...c.inventory]);
+  function solve(pool: number[], cap: number, comfort: number, minimumRounds=comfort): {stacks:number[][]; optimal:boolean}|null {
     let choices: {row:number[];cost:number}[];
-    try{choices=patterns(target,pool,cap,tick).filter(row=>bettingReady(row,sb,bb,comfort)).map(row=>({row,cost:rowCost(row)})).sort((a,b)=>a.cost-b.cost||rank(a.row,b.row));}catch(e){if(interrupted)throw Error('La búsqueda es demasiado amplia para verificar un reparto. Reducí las cantidades del inventario o ajustá el buy-in.');throw e;}
+    try{choices=patterns(target,pool,cap,tick).filter(row=>ready(row,comfort)&&(minimumRounds===comfort||rounds(row,minimumRounds)>=minimumRounds)).map(row=>({row,cost:rowCost(row)})).sort((a,b)=>a.cost-b.cost||rank(a.row,b.row));}catch(e){if(interrupted)throw Error('La búsqueda es demasiado amplia para verificar un reparto. Reducí las cantidades del inventario o ajustá el buy-in.');throw e;}
     if(!choices.length)return null;
     let best:number[][]|null=null, cost=Infinity;
     // An equal allocation is the preferred tie-breaker and a useful proven upper bound.
@@ -186,37 +225,75 @@ function calculate(c: Config, moreChange=false): Result {
     try{pack(c.players,pool,0,0,[]);}catch(e){if(!interrupted)throw e;if(!best)throw Error('No se pudo completar la búsqueda con este inventario. Ajustá el buy-in o las cantidades; no se confirmó que el reparto sea imposible.');}
     return best ? {stacks:best,optimal:!interrupted}:null;
   }
-  const levels=c.mode==='balanced'?[3,2,1,0]:[0];
-  for(const comfort of levels){
-    const payments=openingPayments(sb,bb,comfort);
-    if(comfort>1){if(intermediate<0||c.inventory[intermediate]<(comfort-1)*c.players)continue;payments.push(...Array(comfort-1).fill(DENOMS[intermediate]));}
-    // Necessary global small-chip value bounds reject impossible comfort tiers cheaply.
+  const smallStock=c.inventory.reduce((sum,n,i)=>sum+(DENOMS[i]<=bb?n*DENOMS[i]:0),0);
+  const maxTier=Math.min(3,goal,Math.floor(smallStock/bb/c.players));
+  for(let comfort=c.mode==='balanced'?maxTier:0;comfort>=0;comfort--){
+    const payments=Array<number>(comfort).fill(bb);
+    if(comfort&&needsExactSmall)payments.push(sb);
     if(payments.reduce((s,n)=>s+n,0)>target)continue;
-    if(chain&&DENOMS.slice(1).some((next,i)=>(()=>{const needed=payments.reduce((s,n)=>s+n%next,0);return (needed+((target-needed)%next+next)%next)*c.players>value(c.inventory.map((n,j)=>j<=i?n:0));})()))continue;
+    if(chain&&DENOMS.slice(1).some((next,i)=>{
+      const needed=payments.reduce((s,n)=>s+n%next,0);
+      return (needed+((target-needed)%next+next)%next)*c.players>value(c.inventory.map((n,j)=>j<=i?n:0));
+    }))continue;
+
     const maxPerPlayer=Math.min(target,count(c.inventory)-c.players+1);
-    const seeded=seedAllocation(target,c.inventory,c.players,payments);
-    const seed=seeded?.every(row=>bettingReady(row,sb,bb,comfort))?seeded:null;
-    let selected:{stacks:number[][];optimal:boolean}|null=null;
-    let keptReserve=false;
-    // Balanced search compares playable stacks up to the physical inventory bound. Minimum mode deepens only until its first exact solution.
+    const seed=(requested:number[])=>{
+      if(requested.reduce((sum,n)=>sum+n,0)>target)return null;
+      const rows=seedAllocation(target,c.inventory,c.players,requested);
+      return rows?.every(row=>ready(row,comfort))?rows:null;
+    };
+    // A usable backup even if the bounded joint search cannot enumerate all stacks.
+    const preferredPayments=comfort&&goal>comfort?[...payments,...Array<number>(goal-comfort).fill(bb)]:payments;
+    const backup=seed(preferredPayments)??seed(payments);
+    let solved:{stacks:number[][];optimal:boolean}|null=null;
     for(let cap=c.mode==='minimum'?Math.min(14,maxPerPlayer):maxPerPlayer;cap<=maxPerPlayer;cap++){
-      try{selected=solve(c.inventory,cap,comfort);}catch(e){if(!interrupted||!seed)throw e;selected={stacks:seed,optimal:false};}
-
-      if(!selected)continue;
-      const remaining=selected.stacks.reduce((stock,row)=>subtract(stock,row),[...c.inventory]);
-      keptReserve=readyForBlinds(remaining,sb,bb);
-
-      break;
+      try{solved=solve(c.inventory,cap,comfort);}catch(e){if(!interrupted||!backup)throw e;solved={stacks:backup,optimal:false};}
+      if(solved)break;
     }
-    if(!selected)continue;
-    const solved=selected;
-    const bank=solved.stacks.reduce((stock,row)=>subtract(stock,row),[...c.inventory]);
+    if(!solved)continue;
+
+    let bank=remainingBank(solved.stacks);
+    // Try setting aside a table-wide reserve, then solve again at the same
+    // comfort tier. Prefer the reserve only if it does not cost anyone a BB payment.
+    if(changeGoal&&c.mode==='balanced'&&!interrupted){
+      try{
+        const before=countChange(bank);
+        if(before<changeGoal){
+          const pools=[[...c.inventory]];
+          for(let n=0;n<changeGoal;n++){
+            const row=minimumStack(changeSize,pools[n]);if(!row)break;
+            pools.push(subtract(pools[n],row));
+          }
+          const currentRounds=Math.min(...solved.stacks.map(row=>rounds(row)));
+          for(let n=pools.length-1;n>before;n--){
+            if(value(pools[n])<target*c.players)continue;
+            const candidate=solve(pools[n],maxPerPlayer,comfort,currentRounds);
+            if(!candidate)continue;
+            const candidateBank=remainingBank(candidate.stacks);
+            if(countChange(candidateBank)>before){solved=candidate;bank=candidateBank;break;}
+          }
+        }
+      }catch(e){if(!interrupted)throw e;}
+    }
+
+    // Use a separate budget for reporting so a valid bounded-search fallback
+    // can still display verified opening payments and change.
+    const verifiedRounds=(amount:number,limit:number,pool:number[])=>{
+      let checks=0;
+      return paymentCounter(amount,limit,c.inventory,()=>{if(++checks>2000000)throw Error('La búsqueda de pagos alcanzó su límite.');})(pool);
+    };
+    const bigBlindPayments=Math.min(...solved.stacks.map(row=>verifiedRounds(bb,goal,row)));
+    const changePayments=changeGoal?verifiedRounds(changeSize,changeGoal,bank):0;
+    const smallBlindDirect=solved.stacks.every(row=>canPay(sb,row));
     const warnings:string[]=[];
     if(!c.automatic && c.buyIn!==big*c.bb)warnings.push(`Las ciegas manuales dan un stack de ${(c.buyIn/big).toLocaleString('es-PY',{maximumFractionDigits:4})}bb, distinto de ${c.bb}bb.`);
-    if(c.mode==='balanced'&&comfort===0)warnings.push('El inventario no permite entregar a todos fichas para pagar SB y BB sin cambio. Revisá el stock de fichas chicas o ajustá las ciegas antes de jugar.');
-    if(!canPay(sb,bank)||!canPay(bb,bank))warnings.push('El banco no conserva cambio suficiente para las ciegas. Revisá el reparto antes de confirmarlo.');
-    if(!solved.optimal)warnings.push('Reparto exacto y válido; se alcanzó el límite de búsqueda antes de comparar todas las combinaciones.');
-    return {config:structuredClone(c),stacks:solved.stacks,bank,warnings,optimal:solved.optimal,balanced:comfort>0,reserve:keptReserve,comfort};
+    if(c.mode==='balanced'){
+      if(bigBlindPayments<2)warnings.push('Con el inventario de esta mesa, el reparto tiene poca cobertura de BB. Revisá el stock de fichas para apostar antes de jugar.');
+      if(!smallBlindDirect&&!changePayments)warnings.push('Prepará cambio manual para la SB: no todos los stacks pueden pagarla exacta y el banco no cubre la diferencia.');
+      else if(changeGoal&&changePayments<changeGoal)warnings.push('La reserva para devolver la diferencia de la SB es limitada. Si se agota, prepará cambio adicional.');
+    }
+    if(interrupted||!solved.optimal)warnings.push('Reparto exacto y válido; se alcanzó el límite de búsqueda antes de comparar todas las combinaciones.');
+    return {config:structuredClone(c),stacks:solved.stacks,bank,warnings,optimal:solved.optimal&&!interrupted,balanced:comfort>0,reserve:changeGoal>0&&changePayments>=changeGoal,comfort,bigBlindPayments,changePayments,smallBlindDirect};
   }
   throw Error('No existe un reparto exacto para todos los jugadores con el inventario disponible.');
 }
@@ -253,15 +330,15 @@ function recommend(input:Config & {equivalence?:'auto'|'manual'}): {label:string
   const total=(r:Result)=>r.stacks.reduce((s,row)=>s+count(row),0);
   const liquidity=(r:Result)=>r.bank.reduce((s,n,i)=>s+(DENOMS[i]*r.config.pointValue<=b.big?n:0),0);
   const equal=(r:Result)=>r.stacks.every(row=>row.join()===r.stacks[0].join())?0:1;
-  const recommended=[...results].sort((a,b)=>b.comfort-a.comfort||tableCost(a)-tableCost(b)||Number(b.reserve)-Number(a.reserve)||total(a)-total(b)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
+  const recommended=[...results].sort((a,b)=>b.comfort-a.comfort||b.bigBlindPayments-a.bigBlindPayments||tableCost(a)-tableCost(b)||Number(b.reserve)-Number(a.reserve)||total(a)-total(b)||equal(a)-equal(b)||liquidity(b)-liquidity(a))[0];
   if(incomplete)recommended.warnings.push('Algunas búsquedas alcanzaron su límite; se comparan las soluciones verificadas.');
   return practicalAlternatives(recommended);
 }
-return {validCounts,validateConfig,blinds,incompatibleBlinds,canPay,canFundPayments,bettingDenomination,openingPayments,bettingReady,calculate,changeOptions,applyChange,sessionBank,validateState,recommend,tableCost,count,value,subtract,add};
+return {validCounts,validateConfig,blinds,incompatibleBlinds,canPay,canFundPayments,calculate,changeOptions,applyChange,sessionBank,validateState,recommend,tableCost,count,value,subtract,add};
 }
 const base=createEngine(DENOMS);
 function engine(c?:Config){if(c?.caseId!==2)return base;const values=validValues(c.chipValues)?c.chipValues:COLOR_VALUES;const unit=values.reduce(gcd);return createEngine(values.map(v=>v/unit),unit);}
-export const {count,value,subtract,add,validCounts,canPay,canFundPayments,bettingDenomination,openingPayments,bettingReady}=base;
+export const {count,value,subtract,add,validCounts,canPay,canFundPayments}=base;
 export const blinds=base.blinds;
 export const validateConfig=(c:Config)=>engine(c).validateConfig(c);
 export const incompatibleBlinds=(c:Config)=>engine(c).incompatibleBlinds(c);
@@ -288,7 +365,7 @@ export function recommend(c:Config){
  }
  if(!results.length)throw Error(limited?'No se completó la búsqueda. Probá valores manuales.':'No se encontró un reparto exacto con los valores automáticos evaluados. Revisá el inventario o definí valores manuales.');
  const scored=results.map(result=>({result,cost:engine(result.config).tableCost(result)}));
- scored.sort((a,b)=>b.result.comfort-a.result.comfort||a.cost-b.cost||Number(b.result.reserve)-Number(a.result.reserve)||count(a.result.stacks.flat())-count(b.result.stacks.flat()));
+ scored.sort((a,b)=>b.result.comfort-a.result.comfort||b.result.bigBlindPayments-a.result.bigBlindPayments||a.cost-b.cost||Number(b.result.reserve)-Number(a.result.reserve)||count(a.result.stacks.flat())-count(b.result.stacks.flat()));
  const result=scored[0].result;if(limited)result.warnings.push('Se compararon las soluciones verificadas; algunas búsquedas alcanzaron su límite.');
  return practicalAlternatives(result);
 }
@@ -297,7 +374,7 @@ export function recommend(c:Config){
 function practicalAlternatives(result:Result){
  let change=result;
  const solver=engine(result.config);
- try{const candidate=solver.calculate(result.config,true);if(candidate.comfort>=result.comfort&&solver.tableCost(candidate,true)<solver.tableCost(result,true))change=candidate;}catch{/* Keep the verified recommendation. */}
+ try{const candidate=solver.calculate(result.config,true);if(candidate.comfort>=result.comfort&&candidate.bigBlindPayments>=result.bigBlindPayments&&candidate.changePayments>=result.changePayments&&solver.tableCost(candidate,true)<solver.tableCost(result,true))change=candidate;}catch{/* Keep the verified recommendation. */}
  const same=change===result;
  return [
   {label:'Recomendada',reason:'Combina fichas para ciegas y apuestas con denominaciones intermedias para cambio y fichas grandes para el capital.',result},
