@@ -5,6 +5,9 @@ import ts from 'typescript';
 const source=readFileSync(new URL('../lib/poker-table-layout.ts',import.meta.url),'utf8');
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {pokerTableLayout,PLAYMAT_SIZE}=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+const projectionSource=readFileSync(new URL('../lib/playmat-projection.ts',import.meta.url),'utf8').replace("import {PLAYMAT_SIZE} from './poker-table-layout';",`const PLAYMAT_SIZE=${JSON.stringify(PLAYMAT_SIZE)};`);
+const projectionJs=ts.transpileModule(projectionSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {PLAYMAT_PROJECTION:p}=await import('data:text/javascript;base64,'+Buffer.from(projectionJs).toString('base64'));
 const overlaps=(a,b)=>a.x<b.x+b.width-.001&&a.x+a.width>b.x+.001&&a.y<b.y+b.height-.001&&a.y+a.height>b.y+.001;
 
 test('all player counts fit without overlapping seats or artwork across responsive widths',()=>{
@@ -35,4 +38,16 @@ test('empty, single and overflow tables have deterministic presentation without 
   assert.equal(pokerTableLayout(390,1).seats.length,1);
   assert.equal(pokerTableLayout(390,12).seats.length,10);
   assert.deepEqual(pokerTableLayout(768,9),pokerTableLayout(768,9));
+});
+test('photograph perspective becomes parallel, symmetric edges in the overhead view',()=>{
+  const project=(x,y)=>({x:(p.scale*x+p.shear*y+p.shift)/(1+p.perspective*y),y:p.scale*y/(1+p.perspective*y)});
+  const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);
+  for(let step=0;step<=20;step++){
+    const fraction=step/20,y=1055*fraction;
+    const left=89*(1-fraction),right=574+(679-574)*fraction;
+    const a=project(left,y),b=project(right,y),center=project((left+right)/2,y);
+    close(a.x,0);close(b.x,679);close(center.x,679/2);close(a.y,b.y);
+    assert.ok(a.y>=0&&a.y<=1055);
+  }
+  close(project(89,0).y,0);close(project(0,1055).y,1055);
 });
