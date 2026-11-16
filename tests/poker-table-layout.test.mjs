@@ -39,6 +39,34 @@ test('empty, single and overflow tables have deterministic presentation without 
   assert.equal(pokerTableLayout(390,12).seats.length,10);
   assert.deepEqual(pokerTableLayout(768,9),pokerTableLayout(768,9));
 });
+test('the numbered seats follow the reference and rotate with the artwork',()=>{
+  const groups=({seats})=>{
+    const numbers=(filter,coordinate)=>seats.filter(filter).sort((a,b)=>a[coordinate]-b[coordinate]).map(s=>s.number);
+    const xs=seats.map(s=>s.x),ys=seats.map(s=>s.y);
+    return {
+      top:numbers(s=>s.y===Math.min(...ys),'x'),
+      right:numbers(s=>s.x===Math.max(...xs),'y'),
+      bottom:numbers(s=>s.y===Math.max(...ys),'x'),
+      left:numbers(s=>s.x===Math.min(...xs),'y'),
+    };
+  };
+  for(const width of [620,768,1000,1280])assert.deepEqual(groups(pokerTableLayout(width,10)),{
+    top:[10,1,2],right:[3,4],bottom:[7,6,5],left:[9,8],
+  });
+  for(const width of [240,320,390,619])assert.deepEqual(groups(pokerTableLayout(width,10)),{
+    top:[3,4],right:[5,6,7],bottom:[9,8],left:[2,1,10],
+  });
+  for (const width of [320,1000]) {
+    const full=pokerTableLayout(width,10).seats;
+    assert.deepEqual(pokerTableLayout(width,2).seats,[full[0],full[5]]);
+    for(let count=1;count<=10;count++) {
+      const seats=pokerTableLayout(width,count).seats;
+      const steps=seats.map((s,i)=>i+1<count?seats[i+1].number-s.number:11-s.number);
+      assert.ok(Math.max(...steps)-Math.min(...steps)<=1);
+      for(const seat of seats)assert.deepEqual(seat,full[seat.number-1]);
+    }
+  }
+});
 test('photograph perspective becomes parallel, symmetric edges in the overhead view',()=>{
   const project=(x,y)=>({x:(p.scale*x+p.shear*y+p.shift)/(1+p.perspective*y),y:p.scale*y/(1+p.perspective*y)});
   const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);

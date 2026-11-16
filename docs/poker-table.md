@@ -6,7 +6,7 @@ El archivo `public/images/table/playmat-official.png` es la imagen adjunta origi
 
 Una máscara redondeada, con un pequeño margen interior, excluye el fondo blanco y sus bordes suavizados en las esquinas. Se conservan las divisiones blancas del diseño. El conjunto rectificado se escala uniformemente y gira 90 grados en contenedores anchos; el contenedor nunca estira la mesa según el espacio sobrante.
 
-`lib/poker-table-layout.ts` calcula el espacio del tapete y cuatro bandas para asientos. No hay coordenadas individuales por jugador ni posiciones basadas en índices fijos. Las bandas se reparten uniformemente según la cantidad de participantes. `ResizeObserver` actualiza el layout según el contenedor, incluso dentro de la cuadrícula de Inicio. El nuevo CSS está aislado de las antiguas reglas de `.felt-table` y `.table-seat`.
+`lib/poker-table-layout.ts` ubica diez asientos según la referencia: arriba 10–1–2 (de izquierda a derecha), a la derecha 3–4 (de arriba abajo), abajo 7–6–5 (de izquierda a derecha) y a la izquierda 9–8 (de arriba abajo). Los asientos giran con el tapete y conservan su número en vertical. Con menos participantes se ocupan posiciones espaciadas en el mismo anillo, empezando por el 1. Las bandas se amplían si hace falta separar las tarjetas. `ResizeObserver` actualiza la distribución según el contenedor, incluso dentro de la cuadrícula de Inicio. El CSS está aislado de las antiguas reglas de `.felt-table` y `.table-seat`.
 
 Las tarjetas comparten dimensiones, muestran avatar/inicial, nombre con elipsis e importe. El nombre y monto completos permanecen en el texto accesible y en el título. Se muestran hasta diez asientos y se conserva el aviso de jugadores adicionales.
 

@@ -28,8 +28,8 @@ export default function PokerTable({players}:{players:TablePlayer[]}) {
           </div>
         </div>
         <ol className="cl-table-seats" aria-label="Jugadores sentados">
-          {visible.map((player,i)=>{const seat=layout.seats[i];return <li className="cl-table-seat" key={player.id} style={{left:seat.x,top:seat.y,width:seat.width,height:seat.height}} title={`${player.name}: ${player.amountTitle}`}>
-            <div className="cl-table-seat-identity"><span className="cl-table-avatar">{player.avatar}</span><span className="cl-table-seat-number" aria-hidden="true">{String(i+1).padStart(2,'0')}</span></div>
+          {visible.map((player,i)=>{const seat=layout.seats[i];return <li className="cl-table-seat" key={player.id} style={{left:seat.x,top:seat.y,width:seat.width,height:seat.height}} title={`Asiento ${seat.number} · ${player.name}: ${player.amountTitle}`}>
+            <div className="cl-table-seat-identity"><span className="cl-table-avatar">{player.avatar}</span><span className="cl-table-seat-number">{String(seat.number).padStart(2,'0')}</span></div>
             <strong className="cl-table-player-name">{player.name}</strong>
             <span className="cl-table-player-amount" aria-label={player.amountTitle}>{player.amountLabel}</span>
           </li>;})}
