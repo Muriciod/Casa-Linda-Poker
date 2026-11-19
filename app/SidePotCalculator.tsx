@@ -2,7 +2,8 @@
 import {useState} from 'react';
 import {calculatePots,distributePots,type Pots} from '../lib/side-pots';
 import './side-pots.css';
-const money=(n:number)=>new Intl.NumberFormat('es-PY').format(n)+' Gs.';
+const guaranies = new Intl.NumberFormat('es-PY');
+const money=(n:number)=>guaranies.format(n)+' Gs.';
 type Draft={id:string;name:string;amount:string;folded:boolean};
 const row=(n:number):Draft=>({id:crypto.randomUUID(),name:'Jugador '+n,amount:'',folded:false});
 const initial:Draft[]=[1,2,3].map(n=>({id:'initial-'+n,name:'Jugador '+n,amount:'',folded:false}));

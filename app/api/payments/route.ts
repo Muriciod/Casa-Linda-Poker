@@ -2,8 +2,7 @@ import { requireAdmin } from "../../../lib/admin-auth";
 import { ensureAppSchema } from "../../../lib/app-storage";
 import { buildPlayerProfiles } from "../../../lib/player-statistics";
 const headers = { "Cache-Control": "private, no-store" };
-async function context() {
-    const db = await ensureAppSchema();
+async function context(db: Awaited<ReturnType<typeof ensureAppSchema>>) {
     const rows = await db.prepare("SELECT data FROM poker_games UNION ALL SELECT data FROM poker_cash_games").all<{
         data: string;
     }>();
@@ -14,7 +13,8 @@ async function context() {
 export async function GET(request: Request) {
     try {
         await requireAdmin(request);
-        const { db, games, profiles } = await context();
+        const db = await ensureAppSchema();
+        const { games, profiles } = await context(db);
         const aliases = (await db.prepare("SELECT profile_key, alias FROM poker_bank_aliases").all<{
             profile_key: string;
             alias: string;
@@ -49,20 +49,26 @@ export async function PATCH(request: Request) {
     try {
         await requireAdmin(request);
         const body = await request.json();
-        const { db, games, profiles } = await context();
+        const db = await ensureAppSchema();
         if (body.action === "alias") {
+            const { profiles } = await context(db);
             if (typeof body.alias !== "string" || body.alias.length > 160 || /[\x00-\x1f]/.test(body.alias) || !profiles.some(p => p.key === body.profileKey))
                 return Response.json({ error: "Alias o perfil no válido." }, { status: 400, headers });
             await db.prepare("INSERT INTO poker_bank_aliases (profile_key, alias) VALUES (?, ?) ON CONFLICT(profile_key) DO UPDATE SET alias=excluded.alias").bind(body.profileKey, body.alias.trim()).run();
         }
         else if (body.action === "transfer") {
-            const game = games.find(g => g.id === body.gameId);
+            // Transfer authorization depends on this one stored session, never on
+            // profiles or the rest of the player's history. Retain the CAS below.
+            const stored = typeof body.gameId === "string" ? await db.prepare(
+                "SELECT data FROM poker_games WHERE id = ? UNION ALL SELECT data FROM poker_cash_games WHERE id = ? LIMIT 1"
+            ).bind(body.gameId, body.gameId).first<{ data: string }>() : null;
+            const game = stored && JSON.parse(stored.data);
             const player = game?.players.find((p: any) => p.id === body.playerId);
-            if (!game || game.mode === "temporary" || game.status !== "finalized" || !player || !Number.isSafeInteger(player.cashOut) || player.cashOut <= 0 || player.cashOut !== body.amount || typeof body.completed !== "boolean")
+            if (!game || game.id !== body.gameId || game.mode === "temporary" || game.status !== "finalized" || !player || !Number.isSafeInteger(player.cashOut) || player.cashOut <= 0 || player.cashOut !== body.amount || typeof body.completed !== "boolean")
                 return Response.json({ error: "El capital cambió o no corresponde a un pago. Actualizá la lista." }, { status: 409, headers });
             const table = game.mode === "cash" ? "poker_cash_games" : "poker_games";
             const updated = await db.prepare(`INSERT INTO poker_transfers (id,game_id,player_id,amount,completed) SELECT ?,?,?,?,? WHERE EXISTS (SELECT 1 FROM ${table} WHERE id=? AND data=?) ON CONFLICT(id) DO UPDATE SET amount=excluded.amount,completed=excluded.completed,updated_at=CURRENT_TIMESTAMP RETURNING id`)
-                .bind(JSON.stringify([game.id, player.id]), game.id, player.id, player.cashOut, body.completed ? 1 : 0, game.id, JSON.stringify(game)).first();
+                .bind(JSON.stringify([game.id, player.id]), game.id, player.id, player.cashOut, body.completed ? 1 : 0, game.id, stored!.data).first();
             if (!updated)
                 return Response.json({ error: "La partida cambió. Actualizá la lista." }, { status: 409, headers });
         }

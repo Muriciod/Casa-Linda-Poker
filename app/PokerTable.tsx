@@ -24,7 +24,7 @@ export default function PokerTable({players}:{players:TablePlayer[]}) {
       <div className="cl-table-scene" style={{height:layout.height}} data-orientation={portrait?'portrait':'landscape'}>
         <div className="cl-table-playmat" role="img" aria-label="Playmat de Casa Linda Poker visto desde arriba" style={{left:mat.x,top:mat.y,width:mat.width,height:mat.height}}>
           <div className="cl-table-flat-art" style={{width:PLAYMAT_SIZE.width,height:PLAYMAT_SIZE.height,transform:portrait?`scale(${mat.width/PLAYMAT_SIZE.width})`:`scale(${mat.width/PLAYMAT_SIZE.height}) translateX(${PLAYMAT_SIZE.height}px) rotate(90deg)`}}>
-            <img src="/images/table/playmat-official.png" alt="" width={PLAYMAT_SIZE.width} height={PLAYMAT_SIZE.height} style={{transform:PLAYMAT_MATRIX}} />
+            <img src="/images/table/playmat.webp" loading="lazy" decoding="async" alt="" width={PLAYMAT_SIZE.width} height={PLAYMAT_SIZE.height} style={{transform:PLAYMAT_MATRIX}} />
           </div>
         </div>
         <ol className="cl-table-seats" aria-label="Jugadores sentados">

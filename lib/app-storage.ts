@@ -25,10 +25,21 @@ export async function runtimeBindings() {
   return env as unknown as RuntimeBindings;
 }
 
+// Only remember completed DDL on this exact binding. Reads, authorization and
+// conditional roster repairs must still see current data on every request.
+// Cold concurrent calls can each run the idempotent batch: never share Worker
+// request-bound promises or database I/O between requests.
+const readySchema = new WeakSet<NonNullable<RuntimeBindings["DB"]>>();
+
 export async function ensureAppSchema() {
   const runtime = await runtimeBindings();
   const db = runtime.DB;
   if (!db) throw new Error("La base de datos no está disponible");
+
+  if (readySchema.has(db)) {
+    await db.prepare(retireUnusedMauriDuplicate).run();
+    return db;
+  }
 
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS poker_games (
@@ -80,9 +91,9 @@ export async function ensureAppSchema() {
       hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0, 1)),
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    db.prepare(retireUnusedMauriDuplicate),
   ]);
-
-  await db.prepare(retireUnusedMauriDuplicate).run();
+  readySchema.add(db);
   return db;
 }
 

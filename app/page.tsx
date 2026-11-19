@@ -3,20 +3,23 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import PokerTable from "./PokerTable";
-import PlayerStatistics from "./PlayerStatistics";
-import AdminNotes from "./AdminNotes";
-import ChipCalculator from "./ChipCalculator";
-import SidePotCalculator from "./SidePotCalculator";
-import Transfers from "./PaymentTools";
+import { deferredSection } from "./deferred-section";
+import ElapsedTime, { duration } from "./ElapsedTime";
 import ParticipantEditor from "./ParticipantEditor";
+import { rosterCountsForMode } from "../lib/roster-session-counts";
 import { editParticipant } from "../lib/player-edit";
 import StakeFields from "./StakeFields";
-import { renderSummaryImage } from "../lib/summary-image";
 import { calculateGameStakes, type EntryCurrency, type BuyInBB } from "../lib/game-stakes";
 import { buildPlayerProfiles, type StatisticsFilter } from "../lib/player-statistics";
 
 type MovementType = "buyin" | "rebuy";
 type GameMode = "chips" | "cash" | "temporary";
+const PlayerStatistics = deferredSection("estadísticas", () => import("./PlayerStatistics"));
+const AdminNotes = deferredSection("las notas", () => import("./AdminNotes"));
+const ChipCalculator = deferredSection("la calculadora de fichas", () => import("./ChipCalculator"));
+const SidePotCalculator = deferredSection("la calculadora de side pots", () => import("./SidePotCalculator"));
+const Transfers = deferredSection("las transferencias", () => import("./PaymentTools"));
+
 const modeLabels = { chips: "Fichas", cash: "CASHGAME · real", temporary: "Temporal · sin historial" };
 type GameStatus = "active" | "finalized";
 type View = "sidepots" | "calculator" | "home" | "live" | "cashout" | "history" | "stats" | "summary";
@@ -94,14 +97,10 @@ async function optimizeProfilePhoto(photo: File) {
   }
 }
 
-function duration(startedAt: string, endedAt?: string | null) {
-  const totalMinutes = Math.max(0, Math.floor((new Date(endedAt ?? Date.now()).getTime() - new Date(startedAt).getTime()) / 60000));
-  return `${Math.floor(totalMinutes / 60)}h ${String(totalMinutes % 60).padStart(2, "0")}m`;
-}
-
-function AppIcon({ name }: { name: string }) {
-  const paths: Record<string, React.ReactNode> = {
+const iconPaths: Record<string, React.ReactNode> = {
     home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h5v-5h4v5h5V9"/></>,
+    chips: <><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v5c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 11v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5"/></>,
+    pots: <><ellipse cx="8" cy="6" rx="5" ry="2.5"/><path d="M3 6v5c0 1.4 2.2 2.5 5 2.5M8 11v6c0 1.7 3 3 6.5 3s6.5-1.3 6.5-3v-6"/><ellipse cx="14.5" cy="11" rx="6.5" ry="3"/></>,
     cashout: <><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18m-6 5h3"/></>,
     history: <><path d="M3 12a9 9 0 1 1 2.6 6.4M3 7v5h5"/><path d="M12 7v5l3 2"/></>,
     stats: <><path d="M4 4v16h16M8 15l4-4 3 2 5-6"/><path d="M16 7h4v4"/></>,
@@ -117,7 +116,8 @@ function AppIcon({ name }: { name: string }) {
     download: <path d="M12 4v11m-4-4 4 4 4-4M5 17v3h14v-3"/>,
     share: <path d="M14 5h5v5m0-5-9 9m2-7H5v13h13v-7"/>,
   };
-  if (paths[name]) return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", flexShrink: 0 }}>{paths[name]}</svg>;
+function AppIcon({ name }: { name: string }) {
+  if (iconPaths[name]) return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle", flexShrink: 0 }}>{iconPaths[name]}</svg>;
   const suits: Record<string, string> = { live: "♠", menu: "•••", trophy: "♛", players: "♣", settings: "⚙" };
   return <span aria-hidden="true">{suits[name] ?? "•"}</span>;
 }
@@ -170,10 +170,9 @@ export default function Home() {
   const [playerKind, setPlayerKind] = useState<"temporal" | "permanente">("temporal");
   const [settings, setSettings] = useState({ connected: false, bridgeUrl: "" });
   const [formError, setFormError] = useState("");
-  const [, setTick] = useState(0);
 
   const archiveGames = useMemo(() => games.filter((game) => (game.mode || "chips") === archiveMode), [games, archiveMode]);
-  const archivedGames = useMemo(() => archiveGames.filter((game) => normalizedName(game.name).includes(normalizedName(historySearch))), [archiveGames, historySearch]);
+  const archivedGames = useMemo(() => { const query = normalizedName(historySearch); return query ? archiveGames.filter(game => normalizedName(game.name).includes(query)) : archiveGames; }, [archiveGames, historySearch]);
   const selectedGame = games.find((game) => game.id === activeGameId);
   const liveGame = selectedGame?.status === "active" ? selectedGame : games.find((game) => game.status === "active");
   const activeGame = (view === "summary" ? selectedGame : liveGame) ?? emptyGame;
@@ -208,13 +207,12 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const interval = window.setInterval(() => setTick((value) => value + 1), 60000);
     const kickoff = window.setTimeout(() => {
       void loadData();
       const setupToken = new URLSearchParams(window.location.search).get("setup");
       if (setupToken) setModal("setup");
     }, 0);
-    return () => { window.clearInterval(interval); window.clearTimeout(kickoff); if (toastTimer.current) clearTimeout(toastTimer.current); };
+    return () => { window.clearTimeout(kickoff); if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, []);
 
   const persistGames = (snapshot: Game[]) => {
@@ -260,7 +258,7 @@ export default function Home() {
     .sort((a, b) => sortBy === "nombre" ? a.name.localeCompare(b.name) : sortBy === "menor" ? invested(a) - invested(b) : sortBy === "recompras" ? b.movements.filter((m) => m.type === "rebuy").length - a.movements.filter((m) => m.type === "rebuy").length : invested(b) - invested(a)), [activeGame.players, search, sortBy]);
 
   const recentMovements = useMemo(() => activeGame.players.flatMap((player) => player.movements.map((movement) => ({ ...movement, playerName: player.nickname || player.name }))).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5), [activeGame.players]);
-  const rosterSessionCounts = useMemo(() => modal !== "add-player" || activeGame.mode === "temporary" ? new Map<string, number>() : new Map(roster.map((entry) => [entry.id, games.filter((game) => (game.mode || "chips") === (activeGame.mode || "chips")).reduce((total, game) => total + (game.players.some((player) => rosterMatchesPlayer(entry, player)) ? 1 : 0), 0)])), [games, roster, activeGame.mode, modal]);
+  const rosterSessionCounts = useMemo(() => modal === "add-player" ? rosterCountsForMode(roster, games, activeGame.mode, normalizedName) : new Map<string, number>(), [games, roster, activeGame.mode, modal]);
   const availableRoster = useMemo(() => (activeGame.mode === "temporary" ? [] : roster)
     .filter((entry) => !activeGame.players.some((player) => rosterMatchesPlayer(entry, player)))
     .sort((a, b) => (rosterSessionCounts.get(b.id) ?? 0) - (rosterSessionCounts.get(a.id) ?? 0) || (a.nickname || a.name).localeCompare(b.nickname || b.name)), [activeGame.players, activeGame.mode, roster, rosterSessionCounts]);
@@ -511,6 +509,7 @@ export default function Home() {
     imageExportBusy.current = true;
     showToast("Preparando imagen y avatares…");
     try {
+      const { renderSummaryImage } = await import("../lib/summary-image");
       const canvas = await renderSummaryImage({
         name: activeGame.name, date: dateTime(activeGame.startedAt), mode: modeLabels[activeGame.mode || "chips"], gameMode: activeGame.mode || "chips",
         blinds: activeGame.blinds, duration: activeGame.legacy ? "Histórica" : duration(activeGame.startedAt, activeGame.endedAt),
@@ -545,20 +544,21 @@ export default function Home() {
     if ((target === "live" || target === "cashout") && liveGame) setActiveGameId(liveGame.id);
     setView(target);
   };
+  const navSection = view === "sidepots" ? "calculator" : view === "summary" ? (returnToStats ? "stats" : "history") : view;
   const navItems: { id: View; label: string; icon: string }[] = [
     { id: "home", label: "Inicio", icon: "home" },
     { id: "live", label: "En vivo", icon: "live" },
     ...(canEdit ? [{ id: "cashout" as View, label: "Caja", icon: "cashout" }] : []),
     { id: "history", label: "Historial", icon: "history" },
     { id: "stats", label: "Estadísticas", icon: "stats" },
-    { id: "calculator", label: "Fichas", icon: "cashout" },
+    { id: "calculator", label: "Fichas", icon: "chips" },
   ];
 
   if (accessMode === "entry") {
     return <main className="entry-screen">
       <div className="entry-glow" />
       <section className="entry-card">
-        <div className="entry-brand"><span className="brand-mark brand-logo large"><Image src="/casa-linda-icon.png" alt="" width={56} height={56} priority unoptimized /></span><div><span>CASA LINDA</span><strong>POKER</strong></div></div>
+        <div className="entry-brand"><span className="brand-mark brand-logo large"><Image src="/images/brand/logo-168.webp" alt="" width={56} height={56} priority unoptimized /></span><div><span>CASA LINDA</span><strong>POKER</strong></div></div>
         <div className="entry-copy"><span className="section-kicker">CLUB DE PÓKER</span><h1>Historial de partidas</h1><p>Seguí las mesas, repasá los resultados y llevá la cuenta de cada sesión.</p></div>
         <div className="entry-options">
           <button className="access-card viewer" onClick={() => { setAccessMode("viewer"); setView("home"); }}><span className="access-icon"><AppIcon name="eye" /></span><span><small>ACCESO PÚBLICO</small><strong>Entrar como visitante</strong><em>Historial, estadísticas y mesa en modo lectura.</em></span><b>Entrar →</b></button>
@@ -572,15 +572,15 @@ export default function Home() {
 
   return <main className={`app-shell ${canEdit ? "admin-mode" : "viewer-mode"}`}>
     <aside className="sidebar">
-      <button className="brand" onClick={() => navigate("home")} aria-label="Ir a Inicio"><span className="brand-mark brand-logo"><Image src="/casa-linda-icon.png" alt="" width={43} height={43} unoptimized /></span><span><strong>Casa Linda</strong><small>Poker</small></span></button>
-      <nav className="side-nav" aria-label="Navegación principal">{navItems.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} aria-current={view === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><AppIcon name={item.icon} /><span>{item.label}</span>{item.id === "live" && activeGame.status === "active" && <i />}</button>)}</nav>
-      <div className="sidebar-game"><div className="eyebrow">{liveGame ? <span className="live-dot" /> : <span>♠</span>} {liveGame ? "Mesa en vivo" : "Casa Linda Poker"}</div><strong>{liveGame?.name ?? "Sin mesa activa"}</strong><span>{liveGame ? `${liveGame.players.length} jugadores · ${duration(liveGame.startedAt)}` : "Historial y estadísticas del club"}</span></div>
+      <button className="brand" onClick={() => navigate("home")} aria-label="Ir a Inicio"><span className="brand-mark brand-logo"><Image src="/images/brand/logo-168.webp" alt="" width={43} height={43} unoptimized /></span><span><strong>Casa Linda</strong><small>Poker</small></span></button>
+      <nav className="side-nav" aria-label="Navegación principal">{navItems.map((item) => <button key={item.id} className={navSection === item.id ? "active" : ""} aria-current={view === item.id ? "page" : navSection === item.id ? "location" : undefined} onClick={() => navigate(item.id)}><AppIcon name={item.icon} /><span>{item.label}</span>{item.id === "live" && activeGame.status === "active" && <i />}</button>)}</nav>
+      <div className="sidebar-game"><div className="eyebrow">{liveGame ? <span className="live-dot" /> : <span>♠</span>} {liveGame ? "Mesa en vivo" : "Casa Linda Poker"}</div><strong>{liveGame?.name ?? "Sin mesa activa"}</strong><span>{liveGame ? <>{liveGame.players.length} jugadores · <ElapsedTime start={liveGame.startedAt}/></> : "Historial y estadísticas del club"}</span></div>
       {canEdit ? <div className={`save-state ${saveState}`}><span />{activeGame.mode === "temporary" ? "Temporal · no se guarda" : saveState === "saved" ? "Guardado automático" : saveState === "saving" ? "Guardando cambios…" : "Guardado pendiente"}</div> : <div className="readonly-note"><AppIcon name="eye" /> Solo lectura</div>}
     </aside>
 
     <section className="content-shell">
       <header className="topbar">
-        <div className="mobile-brand"><span className="brand-mark brand-logo"><Image src="/casa-linda-icon.png" alt="" width={36} height={36} priority unoptimized /></span><strong className="shell-header__mobile-title">Casa Linda Poker</strong></div>
+        <div className="mobile-brand"><span className="brand-mark brand-logo"><Image src="/images/brand/logo-168.webp" alt="" width={36} height={36} priority unoptimized /></span><strong className="shell-header__mobile-title">Casa Linda Poker</strong></div>
         <div className="topbar-actions">
           <span className={`role-pill ${canEdit ? "admin" : "viewer"}`}><AppIcon name={canEdit ? "lock" : "eye"} /> {canEdit ? auth.username : "Visitante"}</span>
           {canEdit && <button className="icon-button" onClick={openSettings} title="Configuración" aria-label="Configuración"><AppIcon name="settings" /></button>}
@@ -623,7 +623,13 @@ export default function Home() {
             <button onClick={() => navigate("history")}><span className="home-link-icon"><AppIcon name="history" /></span><span><strong>Historial</strong><small>Explorar las sesiones de la casa</small></span><b aria-hidden="true">→</b></button>
             <button onClick={() => navigate("stats")}><span className="home-link-icon"><AppIcon name="stats" /></span><span><strong>Estadísticas</strong><small>Ver rankings y perfiles</small></span><b aria-hidden="true">→</b></button>
           </div>
-          <div className="home-links"><button onClick={() => navigate("sidepots")}><span className="home-link-icon"><AppIcon name="cashout" /></span><span><strong>Calculadora de Side Pots</strong><small>All-ins, pozos y distribución de premios</small></span><b aria-hidden="true">→</b></button><button onClick={() => navigate("calculator")}><span className="home-link-icon"><AppIcon name="cashout" /></span><span><strong>Calculadora de Fichas</strong><small>Preparar stacks, inventario y cambio</small></span><b aria-hidden="true">→</b></button></div>
+          <section className="home-tools" aria-labelledby="home-tools-title">
+            <div className="home-tools__heading"><h2 id="home-tools-title">Herramientas de mesa</h2></div>
+            <div className="home-links home-tools__links">
+              <button onClick={() => navigate("calculator")}><span className="home-link-icon"><AppIcon name="chips" /></span><span><strong>Calculadora de Fichas</strong><small>Repartos e inventario</small></span></button>
+              <button onClick={() => navigate("sidepots")}><span className="home-link-icon"><AppIcon name="pots" /></span><span><strong>Calculadora de Side Pots</strong><small>Pozos y premios de all-in</small></span></button>
+            </div>
+          </section>
           {canEdit && <AdminNotes />}
           {canEdit && temporaryGames.length > 0 && <section className="temporary-sessions">
             <div><span className="section-kicker">SOLO EN ESTA PESTAÑA</span><h2>Mesas temporales</h2></div>
@@ -641,9 +647,9 @@ export default function Home() {
         </section>}
 
         {view === "live" && liveGame && <>
-          <section className="session-hero"><div className="session-title-block"><div className={`session-status ${activeGame.status}`}><span className={activeGame.status === "active" ? "live-dot" : ""} />{activeGame.status === "active" ? "EN VIVO" : "PARTIDA FINALIZADA"}</div><h1>{activeGame.name}</h1><div className="session-meta"><span><AppIcon name="clock" /> {time(activeGame.startedAt)}</span><span><AppIcon name="players" /> {totals.players} jugadores</span><span>◷ {duration(activeGame.startedAt, activeGame.endedAt)}</span></div><p className="session-description">{activeGame.blinds || "5.000 / 10.000"}{activeGame.notes ? ` · ${activeGame.notes}` : ""}</p></div>{canEdit && <div className="heading-actions"><button className="secondary" onClick={() => navigate("cashout")}>Cierre de caja</button><button className="primary" onClick={openAddPlayer}><AppIcon name="add" /> Agregar jugador</button></div>}</section>
+          <section className="session-hero"><div className="session-title-block"><div className={`session-status ${activeGame.status}`}><span className={activeGame.status === "active" ? "live-dot" : ""} />{activeGame.status === "active" ? "EN VIVO" : "PARTIDA FINALIZADA"}</div><h1>{activeGame.name}</h1><div className="session-meta"><span><AppIcon name="clock" /> {time(activeGame.startedAt)}</span><span><AppIcon name="players" /> {totals.players} jugadores</span><span>◷ <ElapsedTime start={activeGame.startedAt} end={activeGame.endedAt}/></span></div><p className="session-description">{activeGame.blinds || "5.000 / 10.000"}{activeGame.notes ? ` · ${activeGame.notes}` : ""}</p></div>{canEdit && <div className="heading-actions"><button className="secondary" onClick={() => navigate("cashout")}>Cierre de caja</button><button className="primary" onClick={openAddPlayer}><AppIcon name="add" /> Agregar jugador</button></div>}</section>
           {!canEdit && <div className="viewer-banner"><AppIcon name="eye" /><span><strong>Vista pública</strong> Últimos movimientos guardados · Solo lectura</span></div>}
-          <section className="metric-grid"><article className="metric featured"><span>Dinero en la mesa</span><strong>{activeGame.legacy ? "Histórico" : money(totals.entered)}</strong><small>{activeGame.legacy ? "Resultado neto importado" : `${totals.buyIns} buy-ins · ${totals.rebuys} recompras`}</small><i aria-hidden="true">♠</i></article><article className="metric"><span>Jugadores</span><strong>{totals.players}</strong><small>En la mesa</small></article><article className="metric"><span>Buy-in estándar</span><strong>{money(activeGame.standardBuyIn)}</strong><small>Valor configurado</small></article><article className="metric duration-metric"><span>Duración</span><strong>{duration(activeGame.startedAt, activeGame.endedAt)}</strong><small>Desde las {time(activeGame.startedAt)}</small></article></section>
+          <section className="metric-grid"><article className="metric featured"><span>Dinero en la mesa</span><strong>{activeGame.legacy ? "Histórico" : money(totals.entered)}</strong><small>{activeGame.legacy ? "Resultado neto importado" : `${totals.buyIns} buy-ins · ${totals.rebuys} recompras`}</small><i aria-hidden="true">♠</i></article><article className="metric"><span>Jugadores</span><strong>{totals.players}</strong><small>En la mesa</small></article><article className="metric"><span>Buy-in estándar</span><strong>{money(activeGame.standardBuyIn)}</strong><small>Valor configurado</small></article><article className="metric duration-metric"><span>Duración</span><strong><ElapsedTime start={activeGame.startedAt} end={activeGame.endedAt}/></strong><small>Desde las {time(activeGame.startedAt)}</small></article></section>
           <div className="live-content"><section className="club-overview">
             <MiniPokerTable game={activeGame} avatarUrlForPlayer={avatarUrlForPlayer} />
             <aside className="activity-panel"><div className="panel-title"><div><span className="section-kicker">MOVIMIENTOS</span><h3>Actividad reciente</h3></div><span className="pulse" /></div><div className="activity-list" aria-live="polite">{recentMovements.length ? recentMovements.map((movement) => <div className={`activity-item ${movement.type}`} key={movement.id}><span className="activity-icon">{movement.type === "rebuy" ? "↻" : "+"}</span><div><strong>{movement.playerName}</strong><span>{movement.type === "rebuy" ? "realizó una recompra" : "ingresó a la partida"} · {time(movement.createdAt)}</span></div><b>{compactMoney(movement.amount)}</b></div>) : <p className="empty-note">Sin movimientos detallados.</p>}</div><div className="table-note"><span>Buy-in de la casa</span><strong>{money(activeGame.standardBuyIn)}</strong></div></aside>
@@ -681,14 +687,14 @@ export default function Home() {
 
         {view === "history" && <div className="archive-tabs" role="group" aria-label="Base de resultados"><button className={archiveMode === "chips" ? "selected" : ""} aria-pressed={archiveMode === "chips"} onClick={() => setArchiveMode("chips")}>Fichas</button><button className={archiveMode === "cash" ? "selected" : ""} aria-pressed={archiveMode === "cash"} onClick={() => setArchiveMode("cash")}>CASHGAME · real</button>{archiveMode === "cash" && canEdit && <a href="/api/cash-export" download>Exportar plantilla CSV</a>}</div>}
 
-        {view === "history" && <section className="history-page"><div className="page-heading"><div><div className="eyebrow">Archivo de Casa Linda</div><h1>{archiveMode === "cash" ? "Historial CASHGAME" : "Historial de partidas"}</h1><p>{archiveMode === "cash" ? "Dinero real · registro independiente de las partidas a fichas." : "Partidas a fichas · historial habitual."}</p></div>{canEdit && <button className="primary" onClick={openNewGame}><AppIcon name="add" /> Nueva partida</button>}</div><div className="history-filter"><label className="search-box"><AppIcon name="search" /><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Buscar partida" aria-label="Buscar partida en el historial" /></label><span>{archivedGames.length} {archivedGames.length === 1 ? "partida" : "partidas"}</span></div><div className="history-list">{!archivedGames.length && <p className="game-mode-note">{!loaded ? "Cargando historial…" : dataError ? "No se pudo cargar el historial completo." : historySearch ? "No se encontraron partidas con ese nombre." : "Todavía no hay partidas en este registro."}</p>}{archivedGames.map((game) => { const total = game.players.reduce((sum, player) => sum + invested(player), 0); return <article key={game.id} className="history-card" onClick={() => selectGame(game)}><span className={`status-pill ${game.status}`}><i />{game.status === "active" ? "Activa" : "Finalizada"}</span><div className="history-main"><div className="history-suit">♠</div><div className="history-main-copy"><strong>{game.name}</strong><span>{dateTime(game.startedAt)} · {game.legacy ? "Importada de Sheets" : game.blinds || "5.000 / 10.000"}</span><div className="history-avatars" aria-label={`Jugadores de ${game.name}`}>{game.players.slice(0, 5).map((player) => <ProfileButton key={player.id} player={player} onOpen={(p) => openPlayerProfile(game, p)} className="history-profile-button"><ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} /></ProfileButton>)}{game.players.length > 5 && <span className="history-avatar-more">+{game.players.length - 5}</span>}</div></div></div><div className="history-stat"><span>Jugadores</span><strong>{game.players.length}</strong></div><div className="history-stat"><span>Total jugado</span><strong>{game.legacy ? "—" : money(total)}</strong></div><div className="history-stat"><span>Duración</span><strong>{game.legacy ? "Histórica" : duration(game.startedAt, game.endedAt)}</strong></div><div className="history-actions"><button className="history-open" onClick={(event) => { event.stopPropagation(); selectGame(game); }}>{game.status === "active" ? "Ver en vivo" : "Ver resumen"} →</button>{canEdit && <button className="history-delete" onClick={(event) => { event.stopPropagation(); setDeleteTarget(game); setFormError(""); setModal("delete-game"); }} aria-label={`Eliminar ${game.name}`}><AppIcon name="trash" /> Eliminar</button>}</div></article>; })}</div></section>}
+        {view === "history" && <section className="history-page"><div className="page-heading"><div><div className="eyebrow">Archivo de Casa Linda</div><h1>{archiveMode === "cash" ? "Historial CASHGAME" : "Historial de partidas"}</h1><p>{archiveMode === "cash" ? "Dinero real · registro independiente de las partidas a fichas." : "Partidas a fichas · historial habitual."}</p></div>{canEdit && <button className="primary" onClick={openNewGame}><AppIcon name="add" /> Nueva partida</button>}</div><div className="history-filter"><label className="search-box"><AppIcon name="search" /><input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Buscar partida" aria-label="Buscar partida en el historial" /></label><span>{archivedGames.length} {archivedGames.length === 1 ? "partida" : "partidas"}</span></div><div className="history-list">{!archivedGames.length && <p className="game-mode-note">{!loaded ? "Cargando historial…" : dataError ? "No se pudo cargar el historial completo." : historySearch ? "No se encontraron partidas con ese nombre." : "Todavía no hay partidas en este registro."}</p>}{archivedGames.map((game) => { const total = game.players.reduce((sum, player) => sum + invested(player), 0); return <article key={game.id} className="history-card" onClick={() => selectGame(game)}><span className={`status-pill ${game.status}`}><i />{game.status === "active" ? "Activa" : "Finalizada"}</span><div className="history-main"><div className="history-suit">♠</div><div className="history-main-copy"><strong>{game.name}</strong><span>{dateTime(game.startedAt)} · {game.legacy ? "Importada de Sheets" : game.blinds || "5.000 / 10.000"}</span><div className="history-avatars" aria-label={`Jugadores de ${game.name}`}>{game.players.slice(0, 5).map((player) => <ProfileButton key={player.id} player={player} onOpen={(p) => openPlayerProfile(game, p)} className="history-profile-button"><ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} /></ProfileButton>)}{game.players.length > 5 && <span className="history-avatar-more">+{game.players.length - 5}</span>}</div></div></div><div className="history-stat"><span>Jugadores</span><strong>{game.players.length}</strong></div><div className="history-stat"><span>Total jugado</span><strong>{game.legacy ? "—" : money(total)}</strong></div><div className="history-stat"><span>Duración</span><strong>{game.legacy ? "Histórica" : <ElapsedTime start={game.startedAt} end={game.endedAt}/>}</strong></div><div className="history-actions"><button className="history-open" onClick={(event) => { event.stopPropagation(); selectGame(game); }}>{game.status === "active" ? "Ver en vivo" : "Ver resumen"} →</button>{canEdit && <button className="history-delete" onClick={(event) => { event.stopPropagation(); setDeleteTarget(game); setFormError(""); setModal("delete-game"); }} aria-label={`Eliminar ${game.name}`}><AppIcon name="trash" /> Eliminar</button>}</div></article>; })}</div></section>}
         {returnToStats && (view === "summary" || view === "live") && <button className="secondary profile-back" onClick={() => { setView("stats"); setReturnToStats(false); }}>← Volver al perfil del jugador</button>}
         {view === "stats" && <PlayerStatistics games={games} roster={roster} canEdit={canEdit} selectedKey={statsSelectedKey} onSelect={setStatsSelectedKey} filter={statsFilter} onFilter={setStatsFilter} onUpload={(id, photo) => { const player = roster.find(entry => entry.id === id); if (player) uploadAvatar(player, photo); }} onOpen={(id) => { const game = games.find(entry => entry.id === id); if (game) { setReturnToStats(true); selectGame(game); } }} />}
         {view === "summary" && activeGame.id !== "empty" && <SummaryView game={activeGame} canEdit={canEdit && !activeGame.legacy} onChangeMode={canEdit ? openChangeMode : undefined} avatarUrlForPlayer={avatarUrlForPlayer} onShare={shareSummary} onDownload={downloadSummaryImage} onPrint={() => window.print()} onTransfers={canEdit && activeGame.mode !== "temporary" ? async()=>{try{await persistGames(games);setModal("transfers");}catch{showToast("Guardá la partida antes de gestionar pagos.");}} : undefined} onReopen={reopenGame} onOpenProfile={activeGame.mode === "temporary" ? undefined : (player) => openPlayerProfile(activeGame, player)} />}
       </div>
     </section>
 
-    <nav className="mobile-nav" aria-label="Navegación móvil">{navItems.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} aria-current={view === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><AppIcon name={item.icon} /><span>{item.label === "Estadísticas" ? "Stats" : item.label}</span></button>)}</nav>
+    <nav className="mobile-nav" aria-label="Navegación móvil">{navItems.map((item) => <button key={item.id} className={navSection === item.id ? "active" : ""} aria-current={view === item.id ? "page" : navSection === item.id ? "location" : undefined} onClick={() => navigate(item.id)}><AppIcon name={item.icon} /><span>{item.label === "Estadísticas" ? "Stats" : item.label}</span></button>)}</nav>
     {toast && <div className="toast" role="status"><span aria-hidden="true">♠</span><p>{toast}</p>{canEdit && undoAction && toast.includes("Gs.") && <button onClick={undoLast}>Deshacer</button>}</div>}
 
     {modal && <div className="modal-backdrop" onMouseDown={(event) => !changingMode && !addingPlayer && !deletingGame && event.target === event.currentTarget && setModal(null)}>
@@ -750,7 +756,7 @@ function MiniPokerTable({ game, avatarUrlForPlayer }: { game: Game; avatarUrlFor
 
 function SummaryView({ game, canEdit, onChangeMode, avatarUrlForPlayer, onShare, onDownload, onPrint, onTransfers, onReopen, onOpenProfile }: { game: Game; canEdit: boolean; onChangeMode?: () => void; avatarUrlForPlayer: (player: Player) => string | undefined; onShare: () => void; onDownload: () => void; onPrint: () => void; onTransfers?: () => void; onReopen: () => void; onOpenProfile?: (player: Player) => void }) {
   const ranking = [...game.players].sort((a, b) => result(b) - result(a)); const winner = ranking[0]; const loser = ranking[ranking.length - 1]; const mostRebuys = [...game.players].sort((a, b) => b.movements.filter((m) => m.type === "rebuy").length - a.movements.filter((m) => m.type === "rebuy").length)[0]; const total = game.players.reduce((sum, player) => sum + invested(player), 0); const maxAbs = Math.max(1, ...ranking.map((player) => Math.abs(result(player))));
-  return <section className="summary-page" id="summary-card"><div className="summary-hero"><div><div className="eyebrow"><AppIcon name="trophy" /> Resumen final</div><h1>Resultados de la noche</h1><p>{game.name} · {dateTime(game.startedAt)} · {game.legacy ? "Importada de Google Sheets" : duration(game.startedAt, game.endedAt)}</p></div><div className="summary-actions">{onTransfers && <button className="secondary" onClick={onTransfers}>Transferencias</button>}<button className="secondary" onClick={onShare}><AppIcon name="share" /> Compartir</button><button className="secondary" onClick={onDownload}><AppIcon name="download" /> Imagen</button><button className="primary" onClick={onPrint}>Guardar PDF</button></div></div><div className="summary-type-control"><span>{modeLabels[game.mode || "chips"]}</span>{onChangeMode && <button className="secondary" onClick={onChangeMode}>Cambiar tipo de partida</button>}</div><div className="winner-card"><div className="winner-avatar-wrap">{winner ? <ProfileButton player={winner} onOpen={onOpenProfile} className="winner-profile-button"><ProfileAvatar name={winner.nickname || winner.name} url={avatarUrlForPlayer(winner)} large /></ProfileButton> : <div className="winner-crown">♛</div>}<span>♛</span></div><div><span>Ganador de la noche</span><h2>{winner ? <ProfileButton player={winner} onOpen={onOpenProfile}>{winner.nickname || winner.name}</ProfileButton> : "—"}</h2><p>{game.legacy ? "Resultado neto del historial" : winner ? `Con ${money(winner.cashOut ?? 0)} de cash-out` : "Sin resultados"}</p></div><strong>{winner ? `${result(winner) > 0 ? "+" : ""}${money(result(winner))}` : "—"}</strong></div><div className="summary-highlights"><article><span>Mayor pérdida</span><strong>{loser ? <ProfileButton player={loser} onOpen={onOpenProfile}>{loser.nickname || loser.name}</ProfileButton> : "—"}</strong><b className="negative">{loser ? money(result(loser)) : "—"}</b></article><article><span>Más recompras</span><strong>{game.legacy ? "Sin detalle" : mostRebuys ? <ProfileButton player={mostRebuys} onOpen={onOpenProfile}>{mostRebuys.nickname || mostRebuys.name}</ProfileButton> : "—"}</strong><b>{game.legacy ? "Dato no disponible" : mostRebuys ? `${mostRebuys.movements.filter((m) => m.type === "rebuy").length} recompras` : "—"}</b></article><article><span>Total jugado</span><strong>{game.legacy ? "—" : money(total)}</strong><b>{game.players.length} jugadores</b></article><article><span>Duración total</span><strong>{game.legacy ? "Histórica" : duration(game.startedAt, game.endedAt)}</strong><b>{time(game.startedAt)} {game.legacy ? "" : `— ${game.endedAt ? time(game.endedAt) : "En vivo"}`}</b></article></div><div className="results-panel"><div className="panel-title"><div><h3>Ranking de resultados</h3><span>Ganancia y pérdida neta por jugador</span></div></div><div className="ranking-list">{ranking.map((player, index) => { const value = result(player); return <div className="ranking-row" key={player.id}><span className={`rank ${index === 0 ? "first" : ""}`}>{index + 1}</span><div className="cashout-player"><ProfileButton player={player} onOpen={onOpenProfile} className="ranking-profile-button"><ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} /><strong>{player.nickname || player.name}</strong></ProfileButton><small>{game.legacy ? "Resultado importado" : `Invirtió ${money(invested(player))}`}</small></div><div className="bar-track"><span className={value >= 0 ? "gain" : "loss"} style={{ width: `${Math.max(6, (Math.abs(value) / maxAbs) * 100)}%` }} /></div><strong className={value > 0 ? "positive" : value < 0 ? "negative" : "neutral"}>{value > 0 ? "+" : ""}{money(value)}</strong></div>; })}</div></div><div className="summary-footer">{canEdit && <button className="secondary" onClick={onReopen}>Reabrir para corregir</button>}<span>{game.mode === "temporary" ? "Temporal: no se guarda. Se pierde al recargar o cerrar." : game.mode === "cash" ? "Guardada en el registro exclusivo CASHGAME." : game.legacy ? "Leída desde CasaLindaPoker-Leaderboard." : "Guardada automáticamente en el historial de fichas."}</span></div></section>;
+  return <section className="summary-page" id="summary-card"><div className="summary-hero"><div><div className="eyebrow"><AppIcon name="trophy" /> Resumen final</div><h1>Resultados de la noche</h1><p>{game.name} · {dateTime(game.startedAt)} · {game.legacy ? "Importada de Google Sheets" : <ElapsedTime start={game.startedAt} end={game.endedAt}/>}</p></div><div className="summary-actions">{onTransfers && <button className="secondary" onClick={onTransfers}>Transferencias</button>}<button className="secondary" onClick={onShare}><AppIcon name="share" /> Compartir</button><button className="secondary" onClick={onDownload}><AppIcon name="download" /> Imagen</button><button className="primary" onClick={onPrint}>Guardar PDF</button></div></div><div className="summary-type-control"><span>{modeLabels[game.mode || "chips"]}</span>{onChangeMode && <button className="secondary" onClick={onChangeMode}>Cambiar tipo de partida</button>}</div><div className="winner-card"><div className="winner-avatar-wrap">{winner ? <ProfileButton player={winner} onOpen={onOpenProfile} className="winner-profile-button"><ProfileAvatar name={winner.nickname || winner.name} url={avatarUrlForPlayer(winner)} large /></ProfileButton> : <div className="winner-crown">♛</div>}<span>♛</span></div><div><span>Ganador de la noche</span><h2>{winner ? <ProfileButton player={winner} onOpen={onOpenProfile}>{winner.nickname || winner.name}</ProfileButton> : "—"}</h2><p>{game.legacy ? "Resultado neto del historial" : winner ? `Con ${money(winner.cashOut ?? 0)} de cash-out` : "Sin resultados"}</p></div><strong>{winner ? `${result(winner) > 0 ? "+" : ""}${money(result(winner))}` : "—"}</strong></div><div className="summary-highlights"><article><span>Mayor pérdida</span><strong>{loser ? <ProfileButton player={loser} onOpen={onOpenProfile}>{loser.nickname || loser.name}</ProfileButton> : "—"}</strong><b className="negative">{loser ? money(result(loser)) : "—"}</b></article><article><span>Más recompras</span><strong>{game.legacy ? "Sin detalle" : mostRebuys ? <ProfileButton player={mostRebuys} onOpen={onOpenProfile}>{mostRebuys.nickname || mostRebuys.name}</ProfileButton> : "—"}</strong><b>{game.legacy ? "Dato no disponible" : mostRebuys ? `${mostRebuys.movements.filter((m) => m.type === "rebuy").length} recompras` : "—"}</b></article><article><span>Total jugado</span><strong>{game.legacy ? "—" : money(total)}</strong><b>{game.players.length} jugadores</b></article><article><span>Duración total</span><strong>{game.legacy ? "Histórica" : <ElapsedTime start={game.startedAt} end={game.endedAt}/>}</strong><b>{time(game.startedAt)} {game.legacy ? "" : `— ${game.endedAt ? time(game.endedAt) : "En vivo"}`}</b></article></div><div className="results-panel"><div className="panel-title"><div><h3>Ranking de resultados</h3><span>Ganancia y pérdida neta por jugador</span></div></div><div className="ranking-list">{ranking.map((player, index) => { const value = result(player); return <div className="ranking-row" key={player.id}><span className={`rank ${index === 0 ? "first" : ""}`}>{index + 1}</span><div className="cashout-player"><ProfileButton player={player} onOpen={onOpenProfile} className="ranking-profile-button"><ProfileAvatar name={player.nickname || player.name} url={avatarUrlForPlayer(player)} /><strong>{player.nickname || player.name}</strong></ProfileButton><small>{game.legacy ? "Resultado importado" : `Invirtió ${money(invested(player))}`}</small></div><div className="bar-track"><span className={value >= 0 ? "gain" : "loss"} style={{ width: `${Math.max(6, (Math.abs(value) / maxAbs) * 100)}%` }} /></div><strong className={value > 0 ? "positive" : value < 0 ? "negative" : "neutral"}>{value > 0 ? "+" : ""}{money(value)}</strong></div>; })}</div></div><div className="summary-footer">{canEdit && <button className="secondary" onClick={onReopen}>Reabrir para corregir</button>}<span>{game.mode === "temporary" ? "Temporal: no se guarda. Se pierde al recargar o cerrar." : game.mode === "cash" ? "Guardada en el registro exclusivo CASHGAME." : game.legacy ? "Leída desde CasaLindaPoker-Leaderboard." : "Guardada automáticamente en el historial de fichas."}</span></div></section>;
 }
 
 function ProfileButton({ player, onOpen, className = "", children }: { player: Player; onOpen?: (player: Player) => void; className?: string; children: React.ReactNode }) {

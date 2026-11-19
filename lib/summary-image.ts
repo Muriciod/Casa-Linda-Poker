@@ -23,7 +23,7 @@ export async function renderSummaryImage(data: SummaryImageData): Promise<HTMLCa
   const signed = (n: number, withUnit = true) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${withUnit ? amount(Math.abs(n)) : number(Math.abs(n))}`;
   const color = (n: number) => n > 0 ? palette.positive : n < 0 ? palette.loss : palette.muted;
   const players = [...data.players].sort((a,b) => b.net-a.net);
-  const [logo, ...photos] = await Promise.all([loadImage('/casa-linda-icon.png'), ...players.map(p=>loadImage(p.avatarUrl))]);
+  const [logo, ...photos] = await Promise.all([loadImage('/images/brand/logo-168.webp'), ...players.map(p=>loadImage(p.avatarUrl))]);
   const canvas = document.createElement('canvas');
   canvas.width = 1080;
   canvas.height = 1920 + Math.max(0, players.length - 10) * 106;

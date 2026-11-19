@@ -9,7 +9,8 @@ const chipName=(c:Config,i:number)=>c.caseId===2?colorNames[i]:names[i];
 const chipLabel=(c:Config,i:number)=>c.caseId===2?colorNames[i]:money(chipValues(c)[i]);
 const caseLabel=(c:Config)=>c.caseId===2?'Maletín 2 · Fichas por colores':'Maletín 1 · Fichas numeradas';
 const equivalenceLabel=(c:Config)=>c.caseId===2?(c.autoValues===false?'Valores personalizados':'Valores automáticos'):`1 punto = ${money(c.pointValue)}`;
-const number=(n:number)=>n.toLocaleString('es-PY',{maximumFractionDigits:6});
+const chipNumber = new Intl.NumberFormat('es-PY',{maximumFractionDigits:6});
+const number=(n:number)=>chipNumber.format(n);
 const money=(n:number)=>`${number(n)} Gs.`;
 // Original numbered chips, left to right: white, red, green, black, purple, yellow.
 const chipPhotoCenters=[97,297,499,699,901,1102];
@@ -18,11 +19,19 @@ const chipPhotoCenters=[97,297,499,699,901,1102];
 const colorPhotoBounds=['14 19 132 133','438.5 18.5 130 130','295 17 137 137','153 18 135 136','577 20 138 137'];
 function Chip({i,config=DEFAULT_CONFIG}: {i:number;config?:Config}) {
  const label=`Ficha ${chipName(config,i)}${config.caseId===2?'':` · ${number(DENOMS[i])} puntos`} · ${money(chipValues(config)[i])}`;
- if(config.caseId!==2)return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={`${chipPhotoCenters[i]-87} 30 174 174`} aria-hidden="true" focusable="false"><image href="/images/chips/case-one-original.png" width="1195" height="233"/></svg></span>;
- return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={colorPhotoBounds[i]} preserveAspectRatio="none" aria-hidden="true" focusable="false"><image href={i===1?"/images/chips/case-two-red.png":"/images/chips/case-two-original.png"} width="725" height="160"/></svg></span>;
+ const numbered=config.caseId!==2;
+ const bounds=numbered?`${chipPhotoCenters[i]-87} 30 174 174`:colorPhotoBounds[i];
+ return <span className="physical-chip physical-chip-photo" role="img" aria-label={label}><svg viewBox={bounds} preserveAspectRatio={numbered?'xMidYMid meet':'none'} aria-hidden="true" focusable="false"><image href={numbered?"/images/chips/numbered.webp":"/images/chips/colors.webp"} width={numbered?1195:725} height={numbered?233:160}/></svg></span>;
 }
 function StackCard({stack,config,title}:{stack:number[];config:Config;title:string}) {
   const n=count(stack);return <article className="chip-stack-card"><header><h3>{title}</h3><span className="chip-efficiency">{n<=14?'Reparto compacto':'Reparto ampliado'} · {n} fichas</span></header><div className="chip-stack-lines">{stack.map((qty,i)=>qty>0&&<div key={i}><Chip i={i} config={config}/><span><strong>{qty} × {chipLabel(config,i)}</strong><small>{chipName(config,i)} · {money(chipValues(config)[i])} cada una</small></span><b>{money(qty*chipValues(config)[i])}</b></div>)}</div><footer><strong>{money(monetaryValue(stack,config))}</strong><span>{number(config.buyIn/blinds(config).big)}bb</span></footer></article>;
+}
+function PlayerStackDetails({stacks,config,confirmed=false}:{stacks:number[][];config:Config;confirmed?:boolean}) {
+  const [expanded,setExpanded]=useState(false);
+  return <details className="chip-individual" onToggle={e=>setExpanded(e.currentTarget.open)}>
+    <summary>{confirmed?'Ver reparto confirmado por jugador':'Ver detalle por jugador'}</summary>
+    {expanded&&<div className="chip-cards-grid">{stacks.map((row,i)=><StackCard key={i} stack={row} config={config} title={`Jugador ${i+1}${confirmed?' · reparto inicial':''}`}/>)}</div>}
+  </details>;
 }
 const followSmallBlind=(original:Config):Config=>{const c={...original,mode:'balanced' as const};return c.caseId===2?{...c,autoValues:c.autoValues===true,pointValue:1,equivalence:'manual'}:({...c,pointValue:[100,1000].includes(c.pointValue)?c.pointValue:1000,equivalence:[100,1000].includes(c.pointValue)?c.equivalence??"auto":"auto"});};
 export default function ChipCalculator({canEdit}:{canEdit:boolean}) {
@@ -34,8 +43,8 @@ export default function ChipCalculator({canEdit}:{canEdit:boolean}) {
 function CaseCalculator({canEdit,selected,draft,onDraft,onBusy}:{canEdit:boolean;selected:1|2;draft?:Config;onDraft:(c:Config)=>void;onBusy:(b:boolean)=>void}) {
   const defaults=selected===2?COLOR_CONFIG:DEFAULT_CONFIG;
   const endpoint='/api/chip-calculator'+(selected===2?'?case=2':'');
-  const [config,setConfig]=useState<Config>(followSmallBlind(structuredClone(draft??defaults)));
-  const [stored,setStored]=useState<SavedState>({config:structuredClone(defaults),session:null});
+  const [config,setConfig]=useState<Config>(()=>followSmallBlind(structuredClone(draft??defaults)));
+  const [stored,setStored]=useState<SavedState>(()=>({config:structuredClone(defaults),session:null}));
   const [revision,setRevision]=useState<string|null>(null);
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[calculating,setCalculating]=useState(false);
   const [result,setResult]=useState<Result|null>(null),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -100,7 +109,7 @@ function CaseCalculator({canEdit,selected,draft,onDraft,onBusy}:{canEdit:boolean
     {result&&<section className="chip-results"><div className="chip-section-title"><span>02</span><div><h2>Reparto recomendado por jugador</h2><p>{result.config.players} jugadores · {equivalenceLabel(result.config)} · Equilibrado</p></div></div><p className="chip-muted">{selected===2?(result.config.autoValues===false?'Cada color conserva el valor manual que configuraste.':'Valores recomendados para este buy-in. El banco confirmado conservará estos importes.'):'Los valores de las fichas se ajustan automáticamente según la partida. Solamente utilizamos dos escalas: ×100 y ×1.000.'}</p><div className="chip-inventory-grid">{chipValues(result.config).map((d,i)=><div key={i}><Chip i={i} config={result.config}/><p>{chipName(result.config,i)} · {money(d)}</p></div>)}</div><div className="chip-result-meta"><span>SIMULACIÓN</span><span>{count(result.stacks.flat())} fichas entregadas</span><span>{money(result.config.buyIn*result.config.players)} en la mesa</span></div>
       {result.warnings.map(w=><p key={w} className="chip-warning">{w}</p>)}
       <p className="chip-muted">{result.bigBlindPayments>0?`Cada jugador puede pagar al menos ${result.bigBlindPayments} ${result.bigBlindPayments===1?'BB exacta':'BB exactas'} con fichas distintas.`:'Reparto exacto, pero no todos pueden pagar la BB sin cambio.'} {result.changePayments>0?`El banco puede devolver la diferencia de la SB al menos ${result.changePayments} ${result.changePayments===1?'vez':'veces'}.`:result.smallBlindDirect?'Todos pueden pagar la SB exacta.':''}</p>
-      {same?<><StackCard stack={result.stacks[0]} config={result.config} title={`Mismo reparto para los ${result.config.players} jugadores`}/><details className="chip-individual"><summary>Ver detalle por jugador</summary><div className="chip-cards-grid">{result.stacks.map((row,i)=><StackCard key={i} stack={row} config={result.config} title={`Jugador ${i+1}`}/>)}</div></details></>:<div className="chip-cards-grid">{result.stacks.map((row,i)=><StackCard key={i} stack={row} config={result.config} title={`Jugador ${i+1}`}/>)}</div>}
+      {same?<><StackCard stack={result.stacks[0]} config={result.config} title={`Mismo reparto para los ${result.config.players} jugadores`}/><PlayerStackDetails stacks={result.stacks} config={result.config}/></>:<div className="chip-cards-grid">{result.stacks.map((row,i)=><StackCard key={i} stack={row} config={result.config} title={`Jugador ${i+1}`}/>)}</div>}
       <div className="chip-actions no-chip-print"><button className="secondary" onClick={copy}>Copiar reparto</button><button className="secondary" onClick={()=>window.print()}>Imprimir reparto</button>{canEdit&&<button className="primary" disabled={busy} onClick={confirm}>Confirmar reparto y abrir banco</button>}</div>
     </section>}
     {result&&stored.session&&<div className="chip-mode-picker no-chip-print" role="group" aria-label="Banco a consultar"><button aria-pressed={!showConfirmed} onClick={()=>setShowConfirmed(false)}>Banco de la simulación</button><button aria-pressed={showConfirmed} onClick={()=>setShowConfirmed(true)}>Banco confirmado</button></div>}
@@ -108,7 +117,7 @@ function CaseCalculator({canEdit,selected,draft,onDraft,onBusy}:{canEdit:boolean
       {active&&active.config.caseId!==2&&![100,1000].includes(active.config.pointValue)&&<p className="chip-warning">Banco anterior con una escala retirada. Se conserva su valor original para no alterar los movimientos. Los nuevos repartos usan solo ×100 o ×1.000.</p>}
       {active&&result&&<p className="chip-warning">Este banco pertenece al reparto confirmado, no a la nueva simulación. Confirmá la nueva propuesta para reemplazarlo.</p>}
       <p className="chip-muted">{caseLabel(bankConfig)} · {bankConfig.players} jugadores · {money(bankConfig.buyIn)} por jugador · {equivalenceLabel(bankConfig)}</p>
-      {active&&<details className="chip-individual"><summary>Ver reparto confirmado por jugador</summary><div className="chip-cards-grid">{active.stacks.map((row,i)=><StackCard key={i} stack={row} config={active.config} title={`Jugador ${i+1} · reparto inicial`}/>)}</div></details>}
+      {active&&<PlayerStackDetails stacks={active.stacks} config={active.config} confirmed/>}
       <div className="chip-table-scroll"><table><thead><tr><th>Ficha</th><th>Inventario</th><th>Repartidas</th><th>Banco inicial</th><th>Banco actual</th></tr></thead><tbody>{chipValues(bankConfig).map((d,i)=><tr key={i}><th><Chip i={i} config={bankConfig}/><span>{chipLabel(bankConfig,i)}<small>{bankConfig.caseId===2?money(d):chipName(bankConfig,i)}</small></span></th><td>{bankConfig.inventory[i]}</td><td>{bankConfig.inventory[i]-opening[i]}</td><td>{opening[i]}</td><td className={bank[i]<5?'chip-low':''}>{bank[i]}{bank[i]<5&&<small>{bank[i]===0?'Agotada':'Pocas'}</small>}</td></tr>)}</tbody></table></div>
       <div className="chip-bank-metrics"><div><small>En la mesa</small><b>{money(bankConfig.buyIn*bankConfig.players)}</b><span>{count(bankConfig.inventory)-count(bank)} fichas actuales</span></div><div><small>En el banco</small><b>{money(monetaryValue(bank,bankConfig))}</b><span>{count(bank)} fichas disponibles</span></div><div><small>Tres denominaciones menores</small><b>{count(bank.slice(0,3))}</b><span>{count(bank.slice(0,3))<bankConfig.players*3?'Cambio limitado':'Disponibles para cambio'}</span></div></div>
       {active&&<div className="chip-change no-chip-print">
